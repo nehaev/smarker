@@ -56,23 +56,29 @@ object TemplateParser {
         case (init, head :: tail) => tail.foldLeft(Select(init, head)) { case (acc, field) => Select(acc, field) }
         case _                    => ???
     }
-    val expr: P[Expr] = boolLit | stringLit | intLit | select.backtrack | ident
+    val expr: P[Expr] = (boolLit | stringLit | intLit | select.backtrack | ident)
+        .withContext("expression")
 
     // TEMPLATE STRUCTURE
     val rawText = {
         val rawBreak = "[" ~ ("#" | "=" | "/#")
         val line = P.until(rawBreak | nl)
         (nl.as(RawNewLine) | line.map(RawString.apply)).rep
+            .withContext("rawText")
             .map(elements => RawText(elements.toList))
     }
 
-    val comment = ("[#--" *> P.until0("--]") <* "--]").map(Comment.apply)
-    val interpolation = ("[=" *> expr.dirSpaced <* "]").map(Interpolation.apply)
+    val comment = ("[#--" *> P.until0("--]") <* "--]").withContext("comment").map(Comment.apply)
+    val interpolation = ("[=" *> expr.dirSpaced <* "]").withContext("interpolation").map(Interpolation.apply)
     val directiveCall: P[DirectiveCall] = {
         val arg = (id <* "=".dirSpaced) ~ expr
-        val args = arg.repSep0(directiveWs).map(_.toMap)
+        val args = arg.repSep0(directiveWs)
+            .withContext("dirCall.args")
+            .map(_.toMap)
         val dirStart = "[#" *> id ~ args.dirSpaced
-        val body = P.defer(templateElement).rep0.map(tes => if (tes.isEmpty) None else Some(tes))
+        val body = P.defer(templateElement).rep0
+            .withContext("dirCall.body")
+            .map(tes => if (tes.isEmpty) None else Some(tes))
         val dirShortEnd = "/]".as(None: Option[List[TemplateElement]])
         def dirEnd(name: String): P[Unit] = "[/#" *> name <* "]"
 
@@ -80,8 +86,10 @@ object TemplateParser {
             .flatMap { case (name, args) =>
                 (dirShortEnd | ("]" *> body <* dirEnd(name))).map(b => DirectiveCall(name, args, b))
             }
+            .withContext("dirCall")
     }
 
-    val templateElement = interpolation | comment | directiveCall | rawText
+    val templateElement = (interpolation | comment | directiveCall | rawText)
+        .withContext("templateElement")
     val templateBody = templateElement.rep0.map(elements => TemplateBody(elements.toList))
 }
