@@ -1,0 +1,20 @@
+package com.github.nehaev.smarker
+
+enum SmarkerType derives CanEqual {
+
+    // Primitive types always rendered as toString
+    case String
+    case Int
+    case Bool
+
+    // Collection types
+    case List(itemType: SmarkerType)
+    case Map(valueType: SmarkerType)
+    case Opt(valueType: SmarkerType)
+
+    // Object types
+    case Class(fields: collection.Map[String, SmarkerType])
+    case Dyn
+
+    case Nothing
+}
