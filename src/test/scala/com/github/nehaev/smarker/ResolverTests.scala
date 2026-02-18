@@ -6,7 +6,7 @@ import SmarkerModel.*
 import SmarkerScalaModel.*
 import TemplateParser.templateBody
 
-object ResolverTests {
+object ResolverTests extends TestSuite {
 
     val tests = Tests {
 
