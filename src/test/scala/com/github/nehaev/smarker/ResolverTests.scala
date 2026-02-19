@@ -1,12 +1,16 @@
 package com.github.nehaev.smarker
 
 import utest._
+import Ast.AnySpan
+import Ast.WithSpan
 import Resolver.*
 import SmarkerModel.*
 import SmarkerScalaModel.*
-import TemplateParser.templateBody
+import TemplateParser.Impl.templateBody
 
 object ResolverTests extends TestSuite {
+
+    given [T]: Conversion[T, WithSpan[T]] = v => WithSpan(v, AnySpan)
 
     val tests = Tests {
 
@@ -107,7 +111,8 @@ object ResolverTests extends TestSuite {
             test("undefined variable returns error") {
                 val res = resolveIdent(Ast.Ident("nonexistent"), scopeCtx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Undefined variable"))
+                val err = ScopePathMissingError("nonexistent", scopeCtx.scope, scopeCtx, None)
+                assert(res.left.toOption.get == err)
             }
             test("works with map-based scope") {
                 val mapCtx = resolveScope(model(mapModel), ctx).toOption.get
@@ -136,7 +141,8 @@ object ResolverTests extends TestSuite {
             test("undefined field on map returns error") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("permissions"), "nonexistent"), scopeCtx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Undefined field"))
+                val err = ScopePathMissingError("nonexistent", scopeCtx.scope("permissions"), scopeCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
             }
             test("class field access") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("address"), "street"), scopeCtx)
@@ -151,7 +157,8 @@ object ResolverTests extends TestSuite {
             test("undefined field on class returns error") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("address"), "zipcode"), scopeCtx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Undefined field"))
+                val err = ScopePathMissingError("zipcode", scopeCtx.scope("address"), scopeCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
             }
             test("select on primitive fails") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("name"), "length"), scopeCtx)
@@ -164,7 +171,8 @@ object ResolverTests extends TestSuite {
             test("undefined root variable") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("unknown"), "field"), scopeCtx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Undefined variable"))
+                val err = ScopePathMissingError("unknown", scopeCtx.scope, scopeCtx, None)
+                assert(res.left.toOption.get == err)
             }
             test("nested map access") {
                 val nestedMap = Map("db" -> Map("host" -> "localhost"))
@@ -229,14 +237,20 @@ object ResolverTests extends TestSuite {
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Undefined variable"))
+                val err = res.left.toOption.get.asInstanceOf[ScopePathMissingError]
+                assert(err.path == "unknown")
+                assert(err.span == None)
             }
             test("non-primitive interpolation returns error") {
                 val src = "Scores: [=scores]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Cannot render non-primitive"))
+                val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
+                assert(err.message == "Unable to render")
+                assert(err.expectedType == "primitive")
+                assert(err.actualType == SmarkerType.List(SmarkerType.Int))
+                assert(err.span == None)
             }
             test("error stops rendering mid-template") {
                 val src = "Before [=unknown] After [=name]"
@@ -332,14 +346,18 @@ object ResolverTests extends TestSuite {
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("No `value` arg"))
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("ifDefined", "value", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
             }
             test("self-closing returns error") {
                 val src = "[#ifDefined value=age /]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
-                assert(res.left.toOption.get.message.contains("Body is required"))
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("ifDefined", "body", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
             }
         }
 

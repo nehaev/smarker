@@ -3,8 +3,29 @@ package com.github.nehaev.smarker
 object Ast {
 
     // DEBUG AND OBSERVABILITY INFO
-    case class Span(startOffset: Int, endOffset: Int)
-    case class WithSpan[+T](value: T, span: Span) derives CanEqual
+    sealed trait SpanLike derives CanEqual
+    object SpanLike {
+        given Conversion[SpanLike, Span] = _ match {
+            case s: Span => s
+            case AnySpan => ??? // never reached in the main code
+        }
+    }
+    case class Span(startOffset: Int, endOffset: Int) extends SpanLike {
+        override def equals(that: Any): Boolean = that match {
+            case Span(s, e)      => startOffset == s && endOffset == e
+            case _: AnySpan.type => true
+            case _               => false
+        }
+    }
+    private[smarker] case object AnySpan extends SpanLike {
+        override def equals(that: Any): Boolean = that match {
+            case _: Span => true
+            case _       => this eq that.asInstanceOf[AnyRef]
+        }
+        override def hashCode: Int = 0
+    }
+
+    case class WithSpan[+T](value: T, span: SpanLike) derives CanEqual
 
     // EXPRESSIONS
     sealed trait Expr derives CanEqual
@@ -14,8 +35,8 @@ object Ast {
     case class BoolLiteral(value: Boolean) extends Literal
     case class IntLiteral(value: Int) extends Literal
 
-    case class Ident(name: String) extends Expr
-    case class Select(obj: Select | Ident, field: String) extends Expr
+    case class Ident(name: WithSpan[String]) extends Expr
+    case class Select(obj: Select | Ident, field: WithSpan[String]) extends Expr
 
     // TEMPLATE STRUCTURE
     sealed trait TemplateElement derives CanEqual
@@ -28,7 +49,7 @@ object Ast {
     case class Comment(text: String) extends TemplateElement
     case class Interpolation(expr: Expr) extends TemplateElement
 
-    case class DirectiveCall(name: String, args: Map[String, Expr], body: Option[List[TemplateElement]]) extends TemplateElement
+    case class DirectiveCall(name: WithSpan[String], args: Map[String, Expr], body: Option[List[TemplateElement]]) extends TemplateElement
 
     case class TemplateBody(elements: List[TemplateElement]) derives CanEqual
 

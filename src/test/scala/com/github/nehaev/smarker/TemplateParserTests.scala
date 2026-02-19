@@ -1,13 +1,37 @@
 package com.github.nehaev.smarker
 
 import cats.syntax.show.toShow
+import com.github.nehaev.smarker.TemplateParser.TemplateReference
 import utest.*
 import Ast.*
-import TemplateParser.*
+import TemplateParser.Impl.*
 
 object TemplateParserTests extends TestSuite {
 
+    given [T]: Conversion[T, WithSpan[T]] = v => WithSpan(v, AnySpan)
+
     val tests = Tests {
+        test("ServiceFunctions") {
+            test("AnySpan") {
+                assert(Span(1, 2) == AnySpan)
+            }
+            test("WithSpan") {
+                test("ident span starts at 0") {
+                    val res = ident.parseAll("foo")
+                    assert(res == Right(Ident(WithSpan("foo", Span(0, 3)))))
+                }
+                test("select chain spans") {
+                    val res = select.parseAll("a.b.c")
+                    assert(
+                        res == Right(Select(Select(Ident(WithSpan("a", Span(0, 1))), WithSpan("b", Span(2, 3))), WithSpan("c", Span(4, 5))))
+                    )
+                }
+                test("ident span inside interpolation is shifted past whitespace") {
+                    val res = interpolation.parseAll("[=  foo  ]")
+                    assert(res == Right(Interpolation(Ident(WithSpan("foo", Span(4, 7))))))
+                }
+            }
+        }
         test("BoolLiteral") {
             test("true") {
                 val res = boolLit.parseAll("true").left.map(_.show)
@@ -477,6 +501,61 @@ object TemplateParserTests extends TestSuite {
                         )
                     )
                 )
+            }
+        }
+        test("TemplateParser.parse") {
+            test("complex block succeeds") {
+                val input = """
+                    |[#-- product list --]
+                    |Products:[#list items=products as="p" sep="\n"]
+                    |[#block]- [=p.name]: $[=p.price][/#block]
+                    |[/#list]""".trim().stripMargin
+                val res = TemplateParser.parse(input)
+                assert(
+                    res == Right(
+                        TemplateBody(
+                            List(
+                                Comment(" product list "),
+                                RawText(List(RawNewLine, RawString("Products:"))),
+                                DirectiveCall(
+                                    "list",
+                                    Map("items" -> Ident("products"), "as" -> StringLiteral("p"), "sep" -> StringLiteral("\n")),
+                                    Some(
+                                        List(
+                                            RawText(List(RawNewLine)),
+                                            DirectiveCall(
+                                                "block",
+                                                Map(),
+                                                Some(
+                                                    List(
+                                                        RawText(List(RawString("- "))),
+                                                        Interpolation(Select(Ident("p"), "name")),
+                                                        RawText(List(RawString(": $"))),
+                                                        Interpolation(Select(Ident("p"), "price")),
+                                                    )
+                                                ),
+                                            ),
+                                            RawText(List(RawNewLine)),
+                                        )
+                                    ),
+                                ),
+                            )
+                        )
+                    )
+                )
+            }
+            test("mismatched close tag returns parse error at correct offset") {
+                val input = """
+                    |[#-- broken template --]
+                    |[#list items=products as=\"p"]
+                    |   [=p.name]
+                    |[/#block]""".stripMargin
+                val res = TemplateParser.parse(input)
+                assert(res.isLeft)
+                val err = res.left.toOption.get
+                assert(err.templateBody == input)
+                assert(err.offset == 51)
+                assert(err.reference == Some(TemplateReference(2, "[#list items=products as=\\\"p\"]", Span(25, 25))))
             }
         }
     }
