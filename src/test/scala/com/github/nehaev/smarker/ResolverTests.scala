@@ -4,7 +4,6 @@ import utest._
 import Ast.AnySpan
 import Ast.WithSpan
 import Resolver.*
-import SmarkerModel.*
 import SmarkerScalaModel.*
 import TemplateParser.Impl.templateBody
 
@@ -49,6 +48,16 @@ object ResolverTests extends TestSuite {
                 assert(resolvedCtx.scope.contains("nickname"))
                 assert(resolvedCtx.scope("nickname").getType == SmarkerType.String)
             }
+            test("resolveScope with dyn root") {
+                val dynRoot = model(Map[String, Any]("name" -> "Bob", "age" -> 42))
+                val res = resolveScope(dynRoot, ctx)
+                assert(res.isRight)
+                val resolvedCtx = res.toOption.get
+                assert(resolvedCtx.scope.contains("name"))
+                assert(resolvedCtx.scope("name").getType == SmarkerType.String)
+                assert(resolvedCtx.scope.contains("age"))
+                assert(resolvedCtx.scope("age").getType == SmarkerType.Int)
+            }
             test("resolveScope with class root") {
                 val res = resolveScope(model(classModel), ctx)
                 assert(res.isRight)
@@ -79,7 +88,7 @@ object ResolverTests extends TestSuite {
                 val res = resolveIdent(Ast.Ident("name"), scopeCtx)
                 assert(res.isRight)
                 assert(res.toOption.get.getType == SmarkerType.String)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "Alice")
+                assert(res.toOption.get.getUnderlying[String] == "Alice")
             }
             test("finds list field") {
                 val res = resolveIdent(Ast.Ident("scores"), scopeCtx)
@@ -118,7 +127,13 @@ object ResolverTests extends TestSuite {
                 val mapCtx = resolveScope(model(mapModel), ctx).toOption.get
                 val res = resolveIdent(Ast.Ident("nickname"), mapCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "al")
+                assert(res.toOption.get.getUnderlying[String] == "al")
+            }
+            test("works with dyn-based scope") {
+                val dynCtx = resolveScope(model(Map[String, Any]("label" -> "hello")), ctx).toOption.get
+                val res = resolveIdent(Ast.Ident("label"), dynCtx)
+                assert(res.isRight)
+                assert(res.toOption.get.getUnderlying[String] == "hello")
             }
             test("empty scope returns error") {
                 val res = resolveIdent(Ast.Ident("name"), ctx)
@@ -131,12 +146,12 @@ object ResolverTests extends TestSuite {
             test("map field access") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("permissions"), "admin"), scopeCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "true")
+                assert(res.toOption.get.getUnderlying[Boolean] == true)
             }
             test("map field access second key") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("permissions"), "editor"), scopeCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "false")
+                assert(res.toOption.get.getUnderlying[Boolean] == false)
             }
             test("undefined field on map returns error") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("permissions"), "nonexistent"), scopeCtx)
@@ -147,12 +162,12 @@ object ResolverTests extends TestSuite {
             test("class field access") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("address"), "street"), scopeCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "123 Main St")
+                assert(res.toOption.get.getUnderlying[String] == "123 Main St")
             }
             test("class field access second key") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("address"), "city"), scopeCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "Anytown")
+                assert(res.toOption.get.getUnderlying[String] == "Anytown")
             }
             test("undefined field on class returns error") {
                 val res = resolveSelect(Ast.Select(Ast.Ident("address"), "zipcode"), scopeCtx)
@@ -179,14 +194,25 @@ object ResolverTests extends TestSuite {
                 val nestedCtx = resolveScope(model(nestedMap), ctx).toOption.get
                 val res = resolveSelect(Ast.Select(Ast.Ident("db"), "host"), nestedCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "localhost")
+                assert(res.toOption.get.getUnderlying[String] == "localhost")
+            }
+            test("dyn field access") {
+                val dynCtx = resolveScope(model(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Springfield"))), ctx).toOption.get
+                val res = resolveSelect(Ast.Select(Ast.Ident("addr"), "city"), dynCtx)
+                assert(res.isRight)
+                assert(res.toOption.get.getUnderlying[String] == "Springfield")
+            }
+            test("undefined field on dyn returns error") {
+                val dynCtx = resolveScope(model(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Springfield"))), ctx).toOption.get
+                val res = resolveSelect(Ast.Select(Ast.Ident("addr"), "zip"), dynCtx)
+                assert(res.isLeft)
             }
             test("deep chained select") {
                 val deepMap = Map("a" -> Map("b" -> Map("c" -> "deep")))
                 val deepCtx = resolveScope(model(deepMap), ctx).toOption.get
                 val res = resolveSelect(Ast.Select(Ast.Select(Ast.Ident("a"), "b"), "c"), deepCtx)
                 assert(res.isRight)
-                assert(res.toOption.get.asInstanceOf[PrimitiveModel].getAsString == "deep")
+                assert(res.toOption.get.getUnderlying[String] == "deep")
             }
         }
         test("render") {
@@ -231,6 +257,20 @@ object ResolverTests extends TestSuite {
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(deepMap), ctx)
                 assert(res == Right("DB host: localhost"))
+            }
+            test("dyn root with primitive fields") {
+                val dynRoot = model(Map[String, Any]("greeting" -> "Hi", "count" -> 7))
+                val src = "[=greeting] x[=count]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, dynRoot, ctx)
+                assert(res == Right("Hi x7"))
+            }
+            test("nested select through dyn field") {
+                val dynRoot = model(Map[String, Any]("loc" -> Map[String, Any]("city" -> "Paris")))
+                val src = "City: [=loc.city]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, dynRoot, ctx)
+                assert(res == Right("City: Paris"))
             }
             test("undefined variable in template returns error") {
                 val src = "Hello [=unknown]!"
@@ -340,6 +380,20 @@ object ResolverTests extends TestSuite {
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res == Right("no-perm"))
+            }
+            test("dyn opt field non-empty") {
+                val dynRoot = model(Map[String, Any]("score" -> Some(99)))
+                val src = "[#ifDefined value=score as=\"s\"]score=[=s][/#ifDefined]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, dynRoot, ctx)
+                assert(res == Right("score=99"))
+            }
+            test("dyn nested map field in body") {
+                val dynRoot = model(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Rome")))
+                val src = "[#ifDefined value=addr]city=[=_.city][/#ifDefined]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, dynRoot, ctx)
+                assert(res == Right("city=Rome"))
             }
             test("missing value arg returns error") {
                 val src = "[#ifDefined][=_][/#ifDefined]"

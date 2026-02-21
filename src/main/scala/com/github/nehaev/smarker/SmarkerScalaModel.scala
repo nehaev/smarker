@@ -60,15 +60,21 @@ object SmarkerScalaModel {
                 case _       => SmarkerTypeOf.derived[Elem](using summonInline[Mirror.Of[Elem]])
             }
 
+        class ProductSmarkerType[T](
+            fieldNames: List[String],
+            fieldTypes: List[SmarkerTypeOf[?]],
+        ) extends SmarkerTypeOf[T] {
+            private lazy val fieldMap = fieldNames.zip(fieldTypes.map(_.smarkerType)).toMap
+            def smarkerType: SmarkerType = SmarkerType.Class(fieldMap)
+        }
+
         inline given derived[T](using m: Mirror.Of[T]): SmarkerTypeOf[T] = {
             inline m match {
                 case p: Mirror.ProductOf[T] =>
-                    lazy val fieldNames = getFieldNames[T](using m)
-                    lazy val fieldTypes = summonTypeInstances[T, p.MirroredElemTypes]
-                    lazy val fieldMap = fieldNames.zip(fieldTypes.map(_.smarkerType)).toMap
-                    new SmarkerTypeOf[T] {
-                        def smarkerType: SmarkerType = SmarkerType.Class(fieldMap)
-                    }
+                    new ProductSmarkerType[T](
+                        getFieldNames[T](using m),
+                        summonTypeInstances[T, p.MirroredElemTypes],
+                    )
             }
         }
     }
@@ -85,6 +91,7 @@ object SmarkerScalaModel {
             def apply(x: String): Model = new PrimitiveModel {
                 def getType: SmarkerType = SmarkerType.String
                 def getAsString: String = x
+                def getUnderlyingObject: Any = x
             }
         }
 
@@ -92,6 +99,7 @@ object SmarkerScalaModel {
             def apply(x: Int): Model = new PrimitiveModel {
                 def getType: SmarkerType = SmarkerType.Int
                 def getAsString: String = x.toString
+                def getUnderlyingObject: Any = x
             }
         }
 
@@ -99,6 +107,7 @@ object SmarkerScalaModel {
             def apply(x: Boolean): Model = new PrimitiveModel {
                 def getType: SmarkerType = SmarkerType.Bool
                 def getAsString: String = x.toString
+                def getUnderlyingObject: Any = x
             }
         }
 
@@ -108,6 +117,7 @@ object SmarkerScalaModel {
             def apply(x: List[T]): Model = new ListModel {
                 def getType: SmarkerType = SmarkerType.List(tpe.smarkerType)
                 def iterable: Iterable[Model] = x.map(tm.apply)
+                def getUnderlyingObject: Any = x
             }
         }
 
@@ -116,6 +126,7 @@ object SmarkerScalaModel {
                 def getType: SmarkerType = SmarkerType.Map(tpe.smarkerType)
                 def keys: Iterable[String] = x.keys
                 def get(field: String): Option[Model] = x.get(field).map(tm.apply)
+                def getUnderlyingObject: Any = x
             }
         }
 
@@ -124,7 +135,12 @@ object SmarkerScalaModel {
                 def getType: SmarkerType = SmarkerType.Opt(tpe.smarkerType)
                 def isEmpty: Boolean = x.isEmpty
                 def get: Model = x.map(tm.apply).getOrElse(NothingModel)
+                def getUnderlyingObject: Any = x
             }
+        }
+
+        given ToModel[Map[String, Any]] with {
+            def apply(x: Map[String, Any]): Model = model(x)
         }
 
         // Recursive derivation helpers for ToModel
@@ -156,17 +172,24 @@ object SmarkerScalaModel {
             new ClassModel {
                 def getType: SmarkerType = tpe.smarkerType
                 def get(field: String): Option[Model] = fieldMap.get(field)
+                def getUnderlyingObject: Any = x
             }
+        }
+
+        class ProductToModel[T](
+            fieldNames: List[String],
+            elemInstances: List[ToModel[?]]
+        )(using SmarkerTypeOf[T]) extends ToModel[T] {
+            def apply(x: T): Model = convertToModel(x, fieldNames, elemInstances)
         }
 
         inline given derived[T](using m: Mirror.Of[T]): ToModel[T] = {
             inline m match {
                 case p: Mirror.ProductOf[T] =>
-                    lazy val elemInstances = summonToModelInstances[T, p.MirroredElemTypes]
-                    lazy val fieldNames = getFieldNames[T](using m)
-                    new ToModel[T] {
-                        def apply(x: T): Model = convertToModel(x, fieldNames, elemInstances)(using summon[SmarkerTypeOf[T]])
-                    }
+                    new ProductToModel[T](
+                        getFieldNames[T](using m),
+                        summonToModelInstances[T, p.MirroredElemTypes]
+                    )
             }
         }
     }
@@ -177,12 +200,46 @@ object SmarkerScalaModel {
             def getType: SmarkerType = SmarkerType.Map(tpe.smarkerType)
             def keys: Iterable[String] = m.keys
             def get(field: String): Option[Model] = m.get(field).map(tm.apply)
+            def getUnderlyingObject: Any = m
         }
     }
 
     // Class model - delegates to ToModel
     inline def model[T <: Product](x: T)(using tm: ToModel[T]): ClassModel = {
         tm.apply(x).asInstanceOf[ClassModel]
+    }
+
+    // Dyn model - for untyped Map[String, Any]
+    def model(fields: Map[String, Any]): DynModel = {
+        val modelFields = fields.map((k, v) => k -> anyToModel(v))
+        new DynModel {
+            def getType: SmarkerType = SmarkerType.Dyn
+            def keys: Iterable[String] = modelFields.keys
+            def get(field: String): Option[Model] = modelFields.get(field)
+            def getUnderlyingObject: Any = fields
+        }
+    }
+
+    private def anyToModel(v: Any): Model = v match {
+        case s: String    => ToModel[String].apply(s)
+        case n: Int       => ToModel[Int].apply(n)
+        case b: Boolean   => ToModel[Boolean].apply(b)
+        case l: List[?]   => new ListModel {
+            def getType: SmarkerType = SmarkerType.List(SmarkerType.Dyn)
+            def iterable: Iterable[Model] = l.map(anyToModel)
+            def getUnderlyingObject: Any = l
+        }
+        case o: Option[?] => new OptModel {
+            def getType: SmarkerType = SmarkerType.Opt(SmarkerType.Dyn)
+            def isEmpty: Boolean = o.isEmpty
+            def get: Model = o.map(anyToModel).getOrElse(NothingModel)
+            def getUnderlyingObject: Any = o
+        }
+        case p: Product   => model(
+            p.productElementNames.zip(p.productIterator).map((k, v) => k -> v).toMap
+        )
+        case m: Map[_, _] => model(m.asInstanceOf[Map[String, Any]])
+        case _ => throw new IllegalArgumentException(s"Unsupported type: ${v.getClass}")
     }
 
     // Helper methods

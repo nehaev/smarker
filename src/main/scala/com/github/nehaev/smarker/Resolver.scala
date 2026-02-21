@@ -21,6 +21,8 @@ object Resolver {
         val newScope = root match {
             case map: MapModel =>
                 Right(map.keys.map(k => k -> map.get(k).get).toMap)
+            case dyn: DynModel =>
+                Right(dyn.keys.map(k => k -> dyn.get(k).get).toMap)
             case cls: ClassModel =>
                 Right(root.getType match {
                     case SmarkerType.Class(fields) =>
@@ -28,11 +30,11 @@ object Resolver {
                     case _ => ???
                 })
             case unk =>
-                Left(TypeResolutionError("Unable to init root scope", "map or class", unk.getType, root, ctx))
+                Left(TypeResolutionError("Unable to init root scope", "map, class, or dyn", unk.getType, root, ctx))
         }
         for {
             fields <- newScope
-            finalScope = alias.map(a => Map(a -> modelMapToClassModel(fields))).getOrElse(fields)
+            finalScope = alias.map(a => Map(a -> modelMapToDynModel(fields))).getOrElse(fields)
         } yield Context(ctx.scope ++ finalScope)
     }
 
@@ -77,8 +79,8 @@ object Resolver {
                     }
                     .orElse(Some("_"))
                 newCtx <- m match {
-                    case _: MapModel | _: ClassModel => resolveScope(m, ctx, alias)
-                    case _                           => Right(Context(ctx.scope ++ alias.map(_ -> m).toMap))
+                    case _: MapModel | _: ClassModel | _: DynModel => resolveScope(m, ctx, alias)
+                    case _                                         => Right(Context(ctx.scope ++ alias.map(_ -> m).toMap))
                 }
                 _ <- renderBody(body, newCtx, sb)
             } yield ()
@@ -135,10 +137,12 @@ object Resolver {
         rec.flatMap {
             case model: MapModel =>
                 model.get(select.field.value).toRight(ScopePathMissingError(select.field.value, model, ctx, Some(select.field.span)))
+            case model: DynModel =>
+                model.get(select.field.value).toRight(ScopePathMissingError(select.field.value, model, ctx, Some(select.field.span)))
             case model: ClassModel =>
                 model.get(select.field.value).toRight(ScopePathMissingError(select.field.value, model, ctx, Some(select.field.span)))
             case unk =>
-                Left(TypeResolutionError("Unable to select field", "map or class", unk.getType, unk, ctx, Some(select.field.span)))
+                Left(TypeResolutionError("Unable to select field", "map, class, or dyn", unk.getType, unk, ctx, Some(select.field.span)))
         }
     }
 
@@ -151,9 +155,11 @@ object Resolver {
         case _                  => Left(TypeResolutionError(s"Unable to render", "primitive", model.getType, model, ctx))
     }
 
-    private def modelMapToClassModel(map: Map[String, Model]): ClassModel = new ClassModel {
-        def getType: SmarkerType = SmarkerType.Class(map.map((k, v) => k -> v.getType))
+    private def modelMapToDynModel(map: Map[String, Model]): DynModel = new DynModel {
+        def getType: SmarkerType = SmarkerType.Dyn
+        def keys: Iterable[String] = map.keys
         def get(field: String): Option[Model] = map.get(field)
+        def getUnderlyingObject: Any = map
     }
 
 }

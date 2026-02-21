@@ -5,7 +5,10 @@ object SmarkerModel {
     trait Model derives CanEqual {
         def getType: SmarkerType
 
-        override def toString(): String = s"Model for $getType"
+        private[smarker] def getUnderlying[T]: T = getUnderlyingObject.asInstanceOf[T]
+        protected def getUnderlyingObject: Any
+
+        override def toString(): String = s"Model($getType): $getUnderlyingObject"
     }
 
     trait PrimitiveModel extends Model {
@@ -32,10 +35,13 @@ object SmarkerModel {
     }
 
     trait DynModel extends Model {
+        def keys: Iterable[String]
         def get(field: String): Option[Model]
     }
 
     case object NothingModel extends Model {
         override def getType: SmarkerType = SmarkerType.Nothing
+
+        override def getUnderlyingObject: Any = ???
     }
 }
