@@ -61,6 +61,7 @@ object Resolver {
     def renderDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] =
         dirCall.name.value match {
             case "ifDefined" => renderIfDefinedDirectiveCall(dirCall, ctx, sb)
+            case "list"      => renderListDirectiveCall(dirCall, ctx, sb)
             case "block"     => renderBlockDirectiveCall(dirCall, ctx, sb)
         }
 
@@ -103,6 +104,49 @@ object Resolver {
             _ <- if (!resolvedValueModelO.isEmpty) renderValueInBody(resolvedValueModelO.get) else Right(())
             // otherwise render alt if defined
             _ <- if (resolvedValueModelO.isEmpty && !altExprO.isEmpty) renderExpr(altExprO.get, ctx, sb) else Right(())
+        } yield ()
+    }
+
+    def renderListDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
+        val name = dirCall.name
+        for {
+            // self-closing [#list /] is not supported — a body is required to define per-element rendering
+            body <- dirCall.body.toRight(RequiredParamMissingError(name.value, "body", ctx, Some(name.span)))
+            itemsExpr <- dirCall.args.get("items").toRight(RequiredParamMissingError(name.value, "items", ctx, Some(name.span)))
+            itemsModel <- resolveExpr(itemsExpr, ctx)
+            listModel <- itemsModel match {
+                case lm: ListModel => Right(lm)
+                case other         => Left(TypeResolutionError("items must be a list", "list", other.getType, other, ctx, Some(name.span)))
+            }
+            alias <- resolveStringParam(dirCall.args, "as", "_", ctx)
+            sep <- resolveStringParam(dirCall.args, "sep", ", ", ctx)
+            start <- resolveStringParam(dirCall.args, "start", "", ctx)
+            end <- resolveStringParam(dirCall.args, "end", "", ctx)
+            items = listModel.iterable.toList
+            _ <- {
+                // start/end are omitted entirely for an empty list
+                if (items.isEmpty) Right(())
+                else {
+                    write(start, ctx, sb)
+                    val result = items.zipWithIndex.foldLeft(Right(()).withLeft[SmarkerResolutionError]) { (acc, entry) =>
+                        val (item, i) = entry
+                        acc.flatMap { _ =>
+                            // sep is between elements, not after the last one
+                            if (i > 0) write(sep, ctx, sb)
+                            val itemCtxE = item match {
+                                // complex items: expose their fields under the alias so [=alias.field] works;
+                                case _: MapModel | _: ClassModel | _: DynModel =>
+                                    resolveScope(item, ctx, Some(alias))
+                                // primitives: bind the value directly so [=alias] works
+                                case _ =>
+                                    Right(ctx.copy(scope = ctx.scope + (alias -> item)))
+                            }
+                            itemCtxE.flatMap(ic => renderBody(body, ic, sb))
+                        }
+                    }
+                    result.map(_ => write(end, ctx, sb))
+                }
+            }
         } yield ()
     }
 
@@ -204,8 +248,8 @@ object Resolver {
 
     private def write(text: String, ctx: Context, sb: StringBuilder): Unit = {
         val prefix = ctx.indentChar * (ctx.indentSize * ctx.indentLevel)
-        val atLineStart = sb.isEmpty || sb.last == '\n'  // true when the next char starts a new line
-        val lines = text.split("\n", -1)                 // -1 preserves trailing empty segments
+        val atLineStart = sb.isEmpty || sb.last == '\n' // true when the next char starts a new line
+        val lines = text.split("\n", -1) // -1 preserves trailing empty segments
         val result = lines.zipWithIndex
             .map { (line, i) =>
                 // First segment: only indent if we're at a line start (may be a continuation).

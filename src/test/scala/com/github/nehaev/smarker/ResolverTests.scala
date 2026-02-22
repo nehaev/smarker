@@ -416,6 +416,84 @@ object ResolverTests extends TestSuite {
                 assert(res.left.toOption.get == err)
             }
         }
+        test("renderListDirectiveCall") {
+            test("primitives with default alias and default sep") {
+                val src = "[#list items=scores][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("95, 87, 42"))
+            }
+            test("class items with explicit alias and field access") {
+                case class Item(label: String, value: Int)
+                case class Root(items: List[Item])
+                val data = Root(items = List(Item("a", 1), Item("b", 2)))
+                val src = "[#list items=items as=\"it\"][=it.label]=[=it.value][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res == Right("a=1, b=2"))
+            }
+            test("empty list renders nothing") {
+                case class Root(items: List[Int])
+                val data = Root(items = List.empty)
+                val src = "before[#list items=items][=_][/#list]after"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res == Right("beforeafter"))
+            }
+            test("custom separator") {
+                val src = "[#list items=scores sep=\"|\"][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("95|87|42"))
+            }
+            test("newline separator") {
+                val src = "[#list items=scores sep=\"\\n\"][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("95\n87\n42"))
+            }
+            test("start and end params") {
+                val src = "[#list items=scores start=\"[\" end=\"]\"][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("[95, 87, 42]"))
+            }
+            test("start and end not emitted for empty list") {
+                case class Root(items: List[Int])
+                val data = Root(items = List.empty)
+                val src = "[#list items=items start=\"(\" end=\")\"][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res == Right(""))
+            }
+            test("missing items param returns error") {
+                val src = "[#list][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("list", "items", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
+            }
+            test("self-closing returns error") {
+                val src = "[#list items=scores /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("list", "body", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
+            }
+            test("items not a list returns type error") {
+                val src = "[#list items=name][=_][/#list]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
+                assert(err.message == "items must be a list")
+                assert(err.expectedType == "list")
+            }
+        }
         test("renderBlockDirectiveCall") {
             test("default indentation applied to content on new line") {
                 val src = "line1\n[#block]line2[/#block]"
