@@ -1,10 +1,10 @@
 package com.github.nehaev.smarker
 
 import com.github.nehaev.smarker.Ast.Span
+import com.github.nehaev.smarker.Ast.SpanLike
 import com.github.nehaev.smarker.Resolver.Context
 import scala.annotation.tailrec
 import TemplateParser.TemplateReference
-import com.github.nehaev.smarker.Ast.SpanLike
 
 // COMMON ERRORS
 
@@ -63,4 +63,11 @@ final case class ScopePathMissingError(
         value: Any,
         context: Context,
         span: Option[SpanLike] = None,
+) extends SmarkerResolutionError
+
+final case class TemplateReferenceMissingError(
+        targetType: SmarkerType,
+        value: Any,
+        context: Context,
+        span: Option[SpanLike],
 ) extends SmarkerResolutionError

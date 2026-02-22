@@ -7,10 +7,14 @@ object Resolver {
 
     case class Context(
             scope: Map[String, Model],
+            templateRefs: Map[String, TemplateBody],
             indentChar: String = " ",
             indentSize: Int = 4,
             indentLevel: Int = 0,
-    )
+    ) {
+        def addScope(toAdd: Map[String, Model]): Context = copy(scope = scope ++ toAdd)
+        def clearScope: Context = copy(scope = Map())
+    }
 
     private val EmptyStringExpr = StringLiteral("")
 
@@ -40,7 +44,7 @@ object Resolver {
         for {
             fields <- newScope
             finalScope = alias.map(a => Map(a -> modelMapToDynModel(fields))).getOrElse(fields)
-        } yield ctx.copy(scope = ctx.scope ++ finalScope)
+        } yield ctx.addScope(finalScope)
     }
 
     def renderBody(elements: List[TemplateElement], ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
@@ -67,41 +71,56 @@ object Resolver {
 
     def renderIfDefinedDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
         val name = dirCall.name
-        val valueExprE = dirCall.args
-            .get("value")
-            .toRight(RequiredParamMissingError(name.value, "value", ctx, Some(name.span)))
-        val altExprO = dirCall.args.get("alt")
-        val aliasExprO = dirCall.args.get("as")
 
-        val bodyE = dirCall.body.toRight(RequiredParamMissingError(name.value, "body", ctx, Some(name.span)))
-
-        def renderValueInBody(m: Model): Either[SmarkerResolutionError, Unit] = {
+        def renderValueInBody(m: Model, body: List[TemplateElement]): Either[SmarkerResolutionError, Unit] = {
             for {
-                body <- bodyE
-                alias = aliasExprO
-                    .flatMap { a =>
-                        resolveExpr(a, ctx)
-                            .flatMap(m => modelToString(m, ctx))
-                            .toOption
-                    }
-                    .orElse(Some("_"))
+                alias <- resolveStringParam(dirCall.args, "as", "_", ctx)
                 newCtx <- m match {
-                    case _: MapModel | _: ClassModel | _: DynModel => resolveScope(m, ctx, alias)
-                    case _                                         => Right(ctx.copy(scope = ctx.scope ++ alias.map(_ -> m).toMap))
+                    case _: MapModel | _: ClassModel | _: DynModel => resolveScope(m, ctx, Some(alias))
+                    case _                                         => Right(ctx.addScope(Map(alias -> m)))
                 }
                 _ <- renderBody(body, newCtx, sb)
             } yield ()
         }
 
+        def renderValueUsingTemplateRef(m: Model): Either[SmarkerResolutionError, Unit] = {
+            for {
+                targetType <- m match {
+                    case c: ClassModel => Right(c.getType)
+                    case unk =>
+                        Left(
+                            TypeResolutionError(
+                                "Unexpected value type for body-less",
+                                "class",
+                                unk.getType,
+                                unk.getUnderlying,
+                                ctx,
+                                Some(name.span),
+                            )
+                        )
+                }
+                templateName = targetType.asInstanceOf[SmarkerType.Class].name
+                templateBody <- ctx.templateRefs
+                    .get(templateName)
+                    .toRight(TemplateReferenceMissingError(targetType, m.getUnderlying, ctx, Some(name.span)))
+                newCtx <- resolveScope(m, ctx.clearScope)
+                _ <- renderBody(templateBody.elements, newCtx, sb)
+            } yield ()
+        }
+
         for {
-            valueExpr <- valueExprE
+            valueExpr <- dirCall.args.get("value").toRight(RequiredParamMissingError(name.value, "value", ctx, Some(name.span)))
+            altExprO = dirCall.args.get("alt")
+            bodyO = dirCall.body
             valueModelO = resolveExpr(valueExpr, ctx).toOption // TODO: explicit err check?
             resolvedValueModelO = valueModelO.flatMap {
                 case m: OptModel => Option.unless(m.isEmpty)(m.get)
                 case other       => Some(other)
             }
-            // render value if defined
-            _ <- if (!resolvedValueModelO.isEmpty) renderValueInBody(resolvedValueModelO.get) else Right(())
+            // render value (if defined) in body (if defined)
+            _ <- if (!resolvedValueModelO.isEmpty && !bodyO.isEmpty) renderValueInBody(resolvedValueModelO.get, bodyO.get) else Right(())
+            // render value (if defined) in another template (if no body)
+            _ <- if (!resolvedValueModelO.isEmpty && bodyO.isEmpty) renderValueUsingTemplateRef(resolvedValueModelO.get) else Right(())
             // otherwise render alt if defined
             _ <- if (resolvedValueModelO.isEmpty && !altExprO.isEmpty) renderExpr(altExprO.get, ctx, sb) else Right(())
         } yield ()
@@ -109,19 +128,54 @@ object Resolver {
 
     def renderListDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
         val name = dirCall.name
+
+        def renderItemInBody(item: Model, body: List[TemplateElement]): Either[SmarkerResolutionError, Unit] = {
+            for {
+                alias <- resolveStringParam(dirCall.args, "as", "_", ctx)
+                newCtx <- item match {
+                    case _: MapModel | _: ClassModel | _: DynModel => resolveScope(item, ctx, Some(alias))
+                    case _                                         => Right(ctx.addScope(Map(alias -> item)))
+                }
+                _ <- renderBody(body, newCtx, sb)
+            } yield ()
+        }
+
+        def renderItemUsingTemplateRef(item: Model): Either[SmarkerResolutionError, Unit] = {
+            for {
+                targetType <- item match {
+                    case c: ClassModel => Right(c.getType)
+                    case unk =>
+                        Left(
+                            TypeResolutionError(
+                                "Unexpected value type for body-less list",
+                                "class",
+                                unk.getType,
+                                unk.getUnderlying,
+                                ctx,
+                                Some(name.span),
+                            )
+                        )
+                }
+                templateName = targetType.asInstanceOf[SmarkerType.Class].name
+                templateBody <- ctx.templateRefs
+                    .get(templateName)
+                    .toRight(TemplateReferenceMissingError(targetType, item.getUnderlying, ctx, Some(name.span)))
+                newCtx <- resolveScope(item, ctx.clearScope)
+                _ <- renderBody(templateBody.elements, newCtx, sb)
+            } yield ()
+        }
+
         for {
-            // self-closing [#list /] is not supported — a body is required to define per-element rendering
-            body <- dirCall.body.toRight(RequiredParamMissingError(name.value, "body", ctx, Some(name.span)))
             itemsExpr <- dirCall.args.get("items").toRight(RequiredParamMissingError(name.value, "items", ctx, Some(name.span)))
             itemsModel <- resolveExpr(itemsExpr, ctx)
             listModel <- itemsModel match {
                 case lm: ListModel => Right(lm)
                 case other         => Left(TypeResolutionError("items must be a list", "list", other.getType, other, ctx, Some(name.span)))
             }
-            alias <- resolveStringParam(dirCall.args, "as", "_", ctx)
             sep <- resolveStringParam(dirCall.args, "sep", ", ", ctx)
             start <- resolveStringParam(dirCall.args, "start", "", ctx)
             end <- resolveStringParam(dirCall.args, "end", "", ctx)
+            bodyO = dirCall.body
             items = listModel.iterable.toList
             _ <- {
                 // start/end are omitted entirely for an empty list
@@ -133,15 +187,10 @@ object Resolver {
                         acc.flatMap { _ =>
                             // sep is between elements, not after the last one
                             if (i > 0) write(sep, ctx, sb)
-                            val itemCtxE = item match {
-                                // complex items: expose their fields under the alias so [=alias.field] works;
-                                case _: MapModel | _: ClassModel | _: DynModel =>
-                                    resolveScope(item, ctx, Some(alias))
-                                // primitives: bind the value directly so [=alias] works
-                                case _ =>
-                                    Right(ctx.copy(scope = ctx.scope + (alias -> item)))
+                            bodyO match {
+                                case Some(body) => renderItemInBody(item, body)
+                                case None       => renderItemUsingTemplateRef(item)
                             }
-                            itemCtxE.flatMap(ic => renderBody(body, ic, sb))
                         }
                     }
                     result.map(_ => write(end, ctx, sb))

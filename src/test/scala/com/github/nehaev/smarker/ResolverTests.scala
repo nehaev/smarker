@@ -13,7 +13,7 @@ object ResolverTests extends TestSuite {
 
     val tests = Tests {
 
-        val ctx = Context(Map())
+        val ctx = Context(Map(), Map())
 
         case class Address(street: String, city: String)
 
@@ -77,7 +77,7 @@ object ResolverTests extends TestSuite {
                         Map(
                             "street" -> SmarkerType.String,
                             "city" -> SmarkerType.String,
-                        )
+                        ),
                     )
                 )
             }
@@ -115,7 +115,7 @@ object ResolverTests extends TestSuite {
                         Map(
                             "street" -> SmarkerType.String,
                             "city" -> SmarkerType.String,
-                        )
+                        ),
                     )
                 )
             }
@@ -406,14 +406,46 @@ object ResolverTests extends TestSuite {
                 val err = RequiredParamMissingError("ifDefined", "value", errCtx, Some(AnySpan))
                 assert(res.left.toOption.get == err)
             }
-            test("self-closing returns error") {
+            test("body-less: non-class value returns TypeResolutionError") {
+                // age: Option[Int] unwraps to Int — not a class, so no template ref is possible
                 val src = "[#ifDefined value=age /]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
-                val errCtx = res.left.toOption.get.context
-                val err = RequiredParamMissingError("ifDefined", "body", errCtx, Some(AnySpan))
-                assert(res.left.toOption.get == err)
+                val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
+                assert(err.message == "Unexpected value type for body-less")
+                assert(err.expectedType == "class")
+                assert(err.actualType == SmarkerType.Int)
+            }
+            test("body-less: class with registered template renders via template ref") {
+                val addrTpl = templateBody.parseAll("[=street], [=city]").toOption.get
+                val ctxWithRefs = ctx.copy(templateRefs = Map("Address" -> addrTpl))
+                val src = "[#ifDefined value=address /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctxWithRefs)
+                assert(res == Right("123 Main St, Anytown"))
+            }
+            test("body-less: class with no registered template returns TemplateReferenceMissingError") {
+                val src = "[#ifDefined value=address /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val err = res.left.toOption.get.asInstanceOf[TemplateReferenceMissingError]
+                assert(err.targetType == SmarkerType.Class("Address", Map("street" -> SmarkerType.String, "city" -> SmarkerType.String)))
+            }
+            test("body-less: opt empty emits nothing") {
+                val data = Map("age" -> Option.empty[Int])
+                val src = "before[#ifDefined value=age /]after"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res == Right("beforeafter"))
+            }
+            test("body-less: opt empty with alt emits alt") {
+                val data = Map("age" -> Option.empty[Int])
+                val src = "[#ifDefined value=age alt=\"n/a\" /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res == Right("n/a"))
             }
         }
         test("renderListDirectiveCall") {
@@ -475,14 +507,46 @@ object ResolverTests extends TestSuite {
                 val err = RequiredParamMissingError("list", "items", errCtx, Some(AnySpan))
                 assert(res.left.toOption.get == err)
             }
-            test("self-closing returns error") {
+            test("body-less: non-class items return TypeResolutionError") {
+                // scores: List[Int] — primitives are not classes, so no template ref is possible
                 val src = "[#list items=scores /]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
-                val errCtx = res.left.toOption.get.context
-                val err = RequiredParamMissingError("list", "body", errCtx, Some(AnySpan))
-                assert(res.left.toOption.get == err)
+                val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
+                assert(err.message == "Unexpected value type for body-less list")
+                assert(err.expectedType == "class")
+                assert(err.actualType == SmarkerType.Int)
+            }
+            test("body-less: class items with registered template render via template ref") {
+                case class Item(label: String, value: Int)
+                case class Root(items: List[Item])
+                val data = Root(items = List(Item("a", 1), Item("b", 2)))
+                val itemTpl = templateBody.parseAll("[=label]=[=value]").toOption.get
+                val ctxWithRefs = ctx.copy(templateRefs = Map("Item" -> itemTpl))
+                val src = "[#list items=items sep=\", \" /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctxWithRefs)
+                assert(res == Right("a=1, b=2"))
+            }
+            test("body-less: class items with no registered template return TemplateReferenceMissingError") {
+                case class Item(label: String, value: Int)
+                case class Root(items: List[Item])
+                val data = Root(items = List(Item("a", 1)))
+                val src = "[#list items=items /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res.isLeft)
+                val err = res.left.toOption.get.asInstanceOf[TemplateReferenceMissingError]
+                assert(err.targetType == SmarkerType.Class("Item", Map("label" -> SmarkerType.String, "value" -> SmarkerType.Int)))
+            }
+            test("body-less: empty list emits nothing") {
+                case class Root(items: List[String])
+                val data = Root(items = List.empty)
+                val src = "before[#list items=items /]after"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(data), ctx)
+                assert(res == Right("beforeafter"))
             }
             test("items not a list returns type error") {
                 val src = "[#list items=name][=_][/#list]"
