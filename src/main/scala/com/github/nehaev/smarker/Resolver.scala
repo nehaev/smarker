@@ -5,7 +5,12 @@ import SmarkerModel.*
 
 object Resolver {
 
-    case class Context(scope: Map[String, Model])
+    case class Context(
+            scope: Map[String, Model],
+            indentChar: String = " ",
+            indentSize: Int = 4,
+            indentLevel: Int = 0,
+    )
 
     private val EmptyStringExpr = StringLiteral("")
 
@@ -35,7 +40,7 @@ object Resolver {
         for {
             fields <- newScope
             finalScope = alias.map(a => Map(a -> modelMapToDynModel(fields))).getOrElse(fields)
-        } yield Context(ctx.scope ++ finalScope)
+        } yield ctx.copy(scope = ctx.scope ++ finalScope)
     }
 
     def renderBody(elements: List[TemplateElement], ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
@@ -46,7 +51,7 @@ object Resolver {
         case Comment(text) =>
             Right(())
         case RawText(elements) =>
-            elements.foldLeft(Right(()).withLeft[SmarkerResolutionError]) { (acc, e) => acc.flatMap(_ => renderRawTextElement(e, sb)) }
+            elements.foldLeft(Right(()).withLeft[SmarkerResolutionError]) { (acc, e) => acc.flatMap(_ => renderRawTextElement(e, ctx, sb)) }
         case Interpolation(expr) =>
             renderExpr(expr, ctx, sb)
         case dirCall: DirectiveCall =>
@@ -56,6 +61,7 @@ object Resolver {
     def renderDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] =
         dirCall.name.value match {
             case "ifDefined" => renderIfDefinedDirectiveCall(dirCall, ctx, sb)
+            case "block"     => renderBlockDirectiveCall(dirCall, ctx, sb)
         }
 
     def renderIfDefinedDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
@@ -80,7 +86,7 @@ object Resolver {
                     .orElse(Some("_"))
                 newCtx <- m match {
                     case _: MapModel | _: ClassModel | _: DynModel => resolveScope(m, ctx, alias)
-                    case _                                         => Right(Context(ctx.scope ++ alias.map(_ -> m).toMap))
+                    case _                                         => Right(ctx.copy(scope = ctx.scope ++ alias.map(_ -> m).toMap))
                 }
                 _ <- renderBody(body, newCtx, sb)
             } yield ()
@@ -100,17 +106,58 @@ object Resolver {
         } yield ()
     }
 
-    def renderRawTextElement(elem: RawTextElement, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = elem match {
-        case RawString(value) => Right(sb.append(value))
-        case RawNewLine       => Right(sb.append("\n"))
+    def renderBlockDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
+        val name = dirCall.name
+        for {
+            body <- dirCall.body.toRight(RequiredParamMissingError(name.value, "body", ctx, Some(name.span)))
+            identChar <- resolveStringParam(dirCall.args, "identChar", ctx.indentChar, ctx)
+            identSize <- resolveIntParam(dirCall.args, "identSize", ctx.indentSize, ctx, name.span)
+            start <- resolveStringParam(dirCall.args, "start", "", ctx)
+            end <- resolveStringParam(dirCall.args, "end", "", ctx)
+            innerCtx = ctx.copy(indentChar = identChar, indentSize = identSize, indentLevel = ctx.indentLevel + 1)
+            _ = write(start, ctx, sb)
+            _ <- renderBody(body, innerCtx, sb)
+            _ = write(end, ctx, sb)
+        } yield ()
+    }
+
+    def renderRawTextElement(elem: RawTextElement, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = elem match {
+        case RawString(value) => Right(write(value, ctx, sb))
+        case RawNewLine       => Right(write("\n", ctx, sb))
     }
 
     def renderExpr(expr: Expr, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
         for {
             model <- resolveExpr(expr, ctx)
             str <- modelToString(model, ctx)
-        } yield sb.append(str)
+        } yield write(str, ctx, sb)
     }
+
+    def resolveParam[T](
+            args: Map[String, Expr],
+            key: String,
+            default: T,
+            ctx: Context,
+    )(extract: Model => Either[SmarkerResolutionError, T]): Either[SmarkerResolutionError, T] =
+        args.get(key) match {
+            case None       => Right(default)
+            case Some(expr) => resolveExpr(expr, ctx).flatMap(extract)
+        }
+
+    def resolveStringParam(args: Map[String, Expr], key: String, default: String, ctx: Context): Either[SmarkerResolutionError, String] =
+        resolveParam(args, key, default, ctx)(modelToString(_, ctx))
+
+    def resolveIntParam(
+            args: Map[String, Expr],
+            key: String,
+            default: Int,
+            ctx: Context,
+            span: SpanLike,
+    ): Either[SmarkerResolutionError, Int] =
+        resolveParam(args, key, default, ctx) { m =>
+            if m.getType == SmarkerType.Int then Right(m.getUnderlying[Int])
+            else Left(TypeResolutionError(s"Wrong type for param '$key'", "int", m.getType, m, ctx, Some(span)))
+        }
 
     def resolveExpr(expr: Expr, ctx: Context): Either[SmarkerResolutionError, Model] = {
         import SmarkerScalaModel.ToModel
@@ -153,6 +200,22 @@ object Resolver {
     private def modelToString(model: Model, ctx: Context): Either[SmarkerResolutionError, String] = model match {
         case pm: PrimitiveModel => Right(pm.getAsString)
         case _                  => Left(TypeResolutionError(s"Unable to render", "primitive", model.getType, model, ctx))
+    }
+
+    private def write(text: String, ctx: Context, sb: StringBuilder): Unit = {
+        val prefix = ctx.indentChar * (ctx.indentSize * ctx.indentLevel)
+        val atLineStart = sb.isEmpty || sb.last == '\n'  // true when the next char starts a new line
+        val lines = text.split("\n", -1)                 // -1 preserves trailing empty segments
+        val result = lines.zipWithIndex
+            .map { (line, i) =>
+                // First segment: only indent if we're at a line start (may be a continuation).
+                // Later segments: always indent — they follow an embedded newline.
+                // Never indent empty lines (would leave trailing whitespace).
+                val needsPrefix = line.nonEmpty && (if (i == 0) atLineStart else true)
+                if (needsPrefix) prefix + line else line
+            }
+            .mkString("\n")
+        sb.append(result)
     }
 
     private def modelMapToDynModel(map: Map[String, Model]): DynModel = new DynModel {

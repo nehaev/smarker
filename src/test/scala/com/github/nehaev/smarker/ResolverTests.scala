@@ -416,6 +416,60 @@ object ResolverTests extends TestSuite {
                 assert(res.left.toOption.get == err)
             }
         }
+        test("renderBlockDirectiveCall") {
+            test("default indentation applied to content on new line") {
+                val src = "line1\n[#block]line2[/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("line1\n    line2"))
+            }
+            test("custom identChar and identSize") {
+                val src = "[#block identChar=\"-\" identSize=2]X[/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("--X"))
+            }
+            test("start and end wrap body content") {
+                val src = "[#block start=\"S\" end=\"E\"]X[/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("SXE"))
+            }
+            test("body renders scope variables with indentation") {
+                val src = "\n[#block][=name][/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("\n    Alice"))
+            }
+            test("empty lines inside body not prefixed") {
+                val src = "\n[#block]A\n\nB[/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("\n    A\n\n    B"))
+            }
+            test("nested blocks accumulate indentation") {
+                val src = "\n[#block][=name]\n[#block][=name][/#block][/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("\n    Alice\n        Alice"))
+            }
+            test("multiline scope variable has each line indented") {
+                val dynRoot = model(Map[String, Any]("text" -> "line1\nline2\nline3"))
+                val src = "\n[#block][=text][/#block]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, dynRoot, ctx)
+                assert(res == Right("\n    line1\n    line2\n    line3"))
+            }
+            test("self-closing returns RequiredParamMissingError for body") {
+                val src = "[#block /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("block", "body", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
+            }
+        }
 
     }
 
