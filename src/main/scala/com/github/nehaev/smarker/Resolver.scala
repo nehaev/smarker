@@ -117,12 +117,11 @@ object Resolver {
                 case m: OptModel => Option.unless(m.isEmpty)(m.get)
                 case other       => Some(other)
             }
-            // render value (if defined) in body (if defined)
-            _ <- if (!resolvedValueModelO.isEmpty && !bodyO.isEmpty) renderValueInBody(resolvedValueModelO.get, bodyO.get) else Right(())
-            // render value (if defined) in another template (if no body)
-            _ <- if (!resolvedValueModelO.isEmpty && bodyO.isEmpty) renderValueUsingTemplateRef(resolvedValueModelO.get) else Right(())
-            // otherwise render alt if defined
-            _ <- if (resolvedValueModelO.isEmpty && !altExprO.isEmpty) renderExpr(altExprO.get, ctx, sb) else Right(())
+            _ <- (resolvedValueModelO, bodyO) match {
+                case (Some(m), Some(body)) => renderValueInBody(m, body)
+                case (Some(m), None)       => renderValueUsingTemplateRef(m)
+                case (None, _)             => altExprO.fold(Right(()))(renderExpr(_, ctx, sb))
+            }
         } yield ()
     }
 
