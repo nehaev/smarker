@@ -73,6 +73,7 @@ object ResolverTests extends TestSuite {
                 assert(resolvedCtx.scope.contains("address"))
                 assert(
                     resolvedCtx.scope("address").getType == SmarkerType.Class(
+                        "Address",
                         Map(
                             "street" -> SmarkerType.String,
                             "city" -> SmarkerType.String,
@@ -110,6 +111,7 @@ object ResolverTests extends TestSuite {
                 assert(res.isRight)
                 assert(
                     res.toOption.get.getType == SmarkerType.Class(
+                        "Address",
                         Map(
                             "street" -> SmarkerType.String,
                             "city" -> SmarkerType.String,

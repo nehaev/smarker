@@ -1,5 +1,6 @@
 package com.github.nehaev.smarker
 
+import scala.compiletime.constValue
 import scala.compiletime.constValueTuple
 import scala.compiletime.erasedValue
 import scala.compiletime.error
@@ -61,17 +62,19 @@ object SmarkerScalaModel {
             }
 
         class ProductSmarkerType[T](
-            fieldNames: List[String],
-            fieldTypes: List[SmarkerTypeOf[?]],
+                className: String,
+                fieldNames: List[String],
+                fieldTypes: List[SmarkerTypeOf[?]],
         ) extends SmarkerTypeOf[T] {
             private lazy val fieldMap = fieldNames.zip(fieldTypes.map(_.smarkerType)).toMap
-            def smarkerType: SmarkerType = SmarkerType.Class(fieldMap)
+            def smarkerType: SmarkerType = SmarkerType.Class(className, fieldMap)
         }
 
         inline given derived[T](using m: Mirror.Of[T]): SmarkerTypeOf[T] = {
             inline m match {
                 case p: Mirror.ProductOf[T] =>
                     new ProductSmarkerType[T](
+                        constValue[m.MirroredLabel],
                         getFieldNames[T](using m),
                         summonTypeInstances[T, p.MirroredElemTypes],
                     )
@@ -177,9 +180,10 @@ object SmarkerScalaModel {
         }
 
         class ProductToModel[T](
-            fieldNames: List[String],
-            elemInstances: List[ToModel[?]]
-        )(using SmarkerTypeOf[T]) extends ToModel[T] {
+                fieldNames: List[String],
+                elemInstances: List[ToModel[?]],
+        )(using SmarkerTypeOf[T])
+            extends ToModel[T] {
             def apply(x: T): Model = convertToModel(x, fieldNames, elemInstances)
         }
 
@@ -188,7 +192,7 @@ object SmarkerScalaModel {
                 case p: Mirror.ProductOf[T] =>
                     new ProductToModel[T](
                         getFieldNames[T](using m),
-                        summonToModelInstances[T, p.MirroredElemTypes]
+                        summonToModelInstances[T, p.MirroredElemTypes],
                     )
             }
         }
@@ -221,25 +225,28 @@ object SmarkerScalaModel {
     }
 
     private def anyToModel(v: Any): Model = v match {
-        case s: String    => ToModel[String].apply(s)
-        case n: Int       => ToModel[Int].apply(n)
-        case b: Boolean   => ToModel[Boolean].apply(b)
-        case l: List[?]   => new ListModel {
-            def getType: SmarkerType = SmarkerType.List(SmarkerType.Dyn)
-            def iterable: Iterable[Model] = l.map(anyToModel)
-            def getUnderlyingObject: Any = l
-        }
-        case o: Option[?] => new OptModel {
-            def getType: SmarkerType = SmarkerType.Opt(SmarkerType.Dyn)
-            def isEmpty: Boolean = o.isEmpty
-            def get: Model = o.map(anyToModel).getOrElse(NothingModel)
-            def getUnderlyingObject: Any = o
-        }
-        case p: Product   => model(
-            p.productElementNames.zip(p.productIterator).map((k, v) => k -> v).toMap
-        )
+        case s: String  => ToModel[String].apply(s)
+        case n: Int     => ToModel[Int].apply(n)
+        case b: Boolean => ToModel[Boolean].apply(b)
+        case l: List[?] =>
+            new ListModel {
+                def getType: SmarkerType = SmarkerType.List(SmarkerType.Dyn)
+                def iterable: Iterable[Model] = l.map(anyToModel)
+                def getUnderlyingObject: Any = l
+            }
+        case o: Option[?] =>
+            new OptModel {
+                def getType: SmarkerType = SmarkerType.Opt(SmarkerType.Dyn)
+                def isEmpty: Boolean = o.isEmpty
+                def get: Model = o.map(anyToModel).getOrElse(NothingModel)
+                def getUnderlyingObject: Any = o
+            }
+        case p: Product =>
+            model(
+                p.productElementNames.zip(p.productIterator).map((k, v) => k -> v).toMap
+            )
         case m: Map[_, _] => model(m.asInstanceOf[Map[String, Any]])
-        case _ => throw new IllegalArgumentException(s"Unsupported type: ${v.getClass}")
+        case _            => throw new IllegalArgumentException(s"Unsupported type: ${v.getClass}")
     }
 
     // Helper methods
