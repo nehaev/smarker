@@ -82,6 +82,39 @@ object ResolverTests extends TestSuite {
                 )
             }
         }
+        test("WhitespaceControl") {
+            test("leading whitespace stripped on every line") {
+                val src = "  Name: [=name]\n  City: [=address.city]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("Name: Alice\nCity: Anytown"))
+            }
+            test("leading whitespace stripped from expression output") {
+                val dynRoot = model(Map[String, Any]("greeting" -> "  Hello"))
+                val src = "[=greeting]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, dynRoot, ctx)
+                assert(res == Right("Hello"))
+            }
+            test("blank line from directive tag alone is suppressed") {
+                val src = "[#list items=scores sep=\"\"]\n[=_]\n[/#list]\n"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("95\n87\n42\n"))
+            }
+            test("multiple newlines after directive: only first stripped") {
+                val src = """
+                    |[#list items=scores sep=""]
+                    |   [#-- Trailing WS for comment is also stripped --]
+                    |   [=_]
+                    |[/#list]
+                    |
+                    |after""".trim.stripMargin
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("95\n87\n42\n\nafter"))
+            }
+        }
         test("resolveIdent") {
             val scopeCtx = resolveScope(model(classModel), ctx).toOption.get
 
@@ -313,7 +346,7 @@ object ResolverTests extends TestSuite {
                     |=================
                     |Name:    Alice
                     |Address: 123 Main St
-                    |         Anytown
+                    |Anytown
                     |=================""".trim.stripMargin))
             }
         }

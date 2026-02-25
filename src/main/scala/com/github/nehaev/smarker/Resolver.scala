@@ -48,7 +48,49 @@ object Resolver {
     }
 
     def renderBody(elements: List[TemplateElement], ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
-        elements.foldLeft(Right(()).withLeft[SmarkerResolutionError]) { (acc, e) => acc.flatMap(_ => renderTemplateElement(e, ctx, sb)) }
+        val processed = applyWhitespaceControl(elements, stripLeadingNewline = false)
+        processed.foldLeft(Right(()).withLeft[SmarkerResolutionError]) { (acc, e) => acc.flatMap(_ => renderTemplateElement(e, ctx, sb)) }
+    }
+
+    private def renderDirectiveBody(
+            elements: List[TemplateElement],
+            ctx: Context,
+            sb: StringBuilder,
+    ): Either[SmarkerResolutionError, Unit] = {
+        val processed = applyWhitespaceControl(elements, stripLeadingNewline = true)
+        processed.foldLeft(Right(()).withLeft[SmarkerResolutionError]) { (acc, e) => acc.flatMap(_ => renderTemplateElement(e, ctx, sb)) }
+    }
+
+    private def applyWhitespaceControl(elements: List[TemplateElement], stripLeadingNewline: Boolean): List[TemplateElement] = {
+        def stripFirstNewline(rt: RawText): RawText = rt.elements match {
+            case RawNewLine :: rest => RawText(rest)
+            case _                  => rt
+        }
+
+        // Strip the leading newline from the body start when the opening directive tag
+        // occupied its own line (body begins immediately with a newline).
+        val afterLeadingStrip = if (stripLeadingNewline) {
+            elements match {
+                case (rt: RawText) :: tail if rt.elements.headOption.contains(RawNewLine) =>
+                    stripFirstNewline(rt) :: tail
+                case _ => elements
+            }
+        } else elements
+
+        // Strip the first newline following each DirectiveCall or Comment, since those
+        // elements occupy directive-only lines whose trailing newline must be suppressed.
+        // Only the first of multiple consecutive newlines is stripped (the others remain).
+        import scala.annotation.tailrec
+        @tailrec
+        def loop(rem: List[TemplateElement], acc: List[TemplateElement], stripNext: Boolean): List[TemplateElement] = rem match {
+            case Nil                                => acc.reverse
+            case (rt: RawText) :: tail if stripNext => loop(tail, stripFirstNewline(rt) :: acc, false)
+            case (dc: DirectiveCall) :: tail        => loop(tail, dc :: acc, true)
+            case (c: Comment) :: tail               => loop(tail, c :: acc, true)
+            case head :: tail                       => loop(tail, head :: acc, false)
+        }
+
+        loop(afterLeadingStrip, Nil, false)
     }
 
     def renderTemplateElement(elem: TemplateElement, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = elem match {
@@ -79,7 +121,7 @@ object Resolver {
                     case _: MapModel | _: ClassModel | _: DynModel => resolveScope(m, ctx, Some(alias))
                     case _                                         => Right(ctx.addScope(Map(alias -> m)))
                 }
-                _ <- renderBody(body, newCtx, sb)
+                _ <- renderDirectiveBody(body, newCtx, sb)
             } yield ()
         }
 
@@ -104,7 +146,7 @@ object Resolver {
                     .get(templateName)
                     .toRight(TemplateReferenceMissingError(targetType, m.getUnderlying, ctx, Some(name.span)))
                 newCtx <- resolveScope(m, ctx.clearScope)
-                _ <- renderBody(templateBody.elements, newCtx, sb)
+                _ <- renderDirectiveBody(templateBody.elements, newCtx, sb)
             } yield ()
         }
 
@@ -135,7 +177,7 @@ object Resolver {
                     case _: MapModel | _: ClassModel | _: DynModel => resolveScope(item, ctx, Some(alias))
                     case _                                         => Right(ctx.addScope(Map(alias -> item)))
                 }
-                _ <- renderBody(body, newCtx, sb)
+                _ <- renderDirectiveBody(body, newCtx, sb)
             } yield ()
         }
 
@@ -160,7 +202,7 @@ object Resolver {
                     .get(templateName)
                     .toRight(TemplateReferenceMissingError(targetType, item.getUnderlying, ctx, Some(name.span)))
                 newCtx <- resolveScope(item, ctx.clearScope)
-                _ <- renderBody(templateBody.elements, newCtx, sb)
+                _ <- renderDirectiveBody(templateBody.elements, newCtx, sb)
             } yield ()
         }
 
@@ -208,7 +250,7 @@ object Resolver {
             end <- resolveStringParam(dirCall.args, "end", "", ctx)
             innerCtx = ctx.copy(indentChar = identChar, indentSize = identSize, indentLevel = ctx.indentLevel + 1)
             _ = write(start, ctx, sb)
-            _ <- renderBody(body, innerCtx, sb)
+            _ <- renderDirectiveBody(body, innerCtx, sb)
             _ = write(end, ctx, sb)
         } yield ()
     }
@@ -300,11 +342,14 @@ object Resolver {
         val lines = text.split("\n", -1) // -1 preserves trailing empty segments
         val result = lines.zipWithIndex
             .map { (line, i) =>
+                // i > 0 always follows an embedded newline; i == 0 only if already at a line start.
+                val isAtLineStart = i > 0 || (i == 0 && atLineStart)
+                val stripped = if (isAtLineStart) line.dropWhile(c => c == ' ' || c == '\t') else line
                 // First segment: only indent if we're at a line start (may be a continuation).
                 // Later segments: always indent — they follow an embedded newline.
                 // Never indent empty lines (would leave trailing whitespace).
-                val needsPrefix = line.nonEmpty && (if (i == 0) atLineStart else true)
-                if (needsPrefix) prefix + line else line
+                val needsPrefix = stripped.nonEmpty && (if (i == 0) atLineStart else true)
+                if (needsPrefix) prefix + stripped else stripped
             }
             .mkString("\n")
         sb.append(result)
