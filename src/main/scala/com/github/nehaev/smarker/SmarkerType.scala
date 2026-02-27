@@ -13,7 +13,7 @@ enum SmarkerType derives CanEqual {
     case Opt(valueType: SmarkerType)
 
     // Object types
-    case Class(name: String, fields: collection.Map[String, SmarkerType])
+    case Class(name: String, fields: () => collection.Map[String, SmarkerType]) // lazy fields to allow recursive types
     case Dyn
 
     case Nothing

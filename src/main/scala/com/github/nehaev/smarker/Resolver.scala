@@ -35,8 +35,8 @@ object Resolver {
                     Right(dyn.keys.map(k => k -> dyn.get(k).get).toMap)
                 case cls: ClassModel =>
                     Right(root.getType match {
-                        case SmarkerType.Class(_, fields) =>
-                            fields.keys.map(k => k -> cls.get(k).get).toMap
+                        case SmarkerType.Class(_, fieldsSupplier) =>
+                            fieldsSupplier().keys.map(k => k -> cls.get(k).get).toMap
                         case _ => ???
                     })
                 case unk =>

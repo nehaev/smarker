@@ -30,15 +30,15 @@ object SmarkerScalaModel {
             def smarkerType: SmarkerType = SmarkerType.Bool
         }
 
-        given [T](using tpe: SmarkerTypeOf[T]): SmarkerTypeOf[List[T]] with {
+        given [T](using tpe: => SmarkerTypeOf[T]): SmarkerTypeOf[List[T]] with {
             def smarkerType: SmarkerType = SmarkerType.List(tpe.smarkerType)
         }
 
-        given [T](using tpe: SmarkerTypeOf[T]): SmarkerTypeOf[Map[String, T]] with {
+        given [T](using tpe: => SmarkerTypeOf[T]): SmarkerTypeOf[Map[String, T]] with {
             def smarkerType: SmarkerType = SmarkerType.Map(tpe.smarkerType)
         }
 
-        given [T](using tpe: SmarkerTypeOf[T]): SmarkerTypeOf[Option[T]] with {
+        given [T](using tpe: => SmarkerTypeOf[T]): SmarkerTypeOf[Option[T]] with {
             def smarkerType: SmarkerType = SmarkerType.Opt(tpe.smarkerType)
         }
 
@@ -67,7 +67,7 @@ object SmarkerScalaModel {
                 fieldTypes: List[SmarkerTypeOf[?]],
         ) extends SmarkerTypeOf[T] {
             private lazy val fieldMap = fieldNames.zip(fieldTypes.map(_.smarkerType)).toMap
-            def smarkerType: SmarkerType = SmarkerType.Class(className, fieldMap)
+            def smarkerType: SmarkerType = SmarkerType.Class(className, () => fieldMap)
         }
 
         inline given derived[T](using m: Mirror.Of[T]): SmarkerTypeOf[T] = {
@@ -116,7 +116,7 @@ object SmarkerScalaModel {
 
         // given [T <: Model]: ToModel[T] = identity(_)
 
-        given [T](using tm: ToModel[T], tpe: SmarkerTypeOf[T]): ToModel[List[T]] with {
+        given [T](using tm: => ToModel[T], tpe: => SmarkerTypeOf[T]): ToModel[List[T]] with {
             def apply(x: List[T]): Model = new ListModel {
                 def getType: SmarkerType = SmarkerType.List(tpe.smarkerType)
                 def iterable: Iterable[Model] = x.map(tm.apply)
@@ -124,7 +124,7 @@ object SmarkerScalaModel {
             }
         }
 
-        given [T](using tm: ToModel[T], tpe: SmarkerTypeOf[T]): ToModel[Map[String, T]] with {
+        given [T](using tm: => ToModel[T], tpe: => SmarkerTypeOf[T]): ToModel[Map[String, T]] with {
             def apply(x: Map[String, T]): Model = new MapModel {
                 def getType: SmarkerType = SmarkerType.Map(tpe.smarkerType)
                 def keys: Iterable[String] = x.keys
@@ -133,7 +133,7 @@ object SmarkerScalaModel {
             }
         }
 
-        given [T](using tm: ToModel[T], tpe: SmarkerTypeOf[T]): ToModel[Option[T]] with {
+        given [T](using tm: => ToModel[T], tpe: => SmarkerTypeOf[T]): ToModel[Option[T]] with {
             def apply(x: Option[T]): Model = new OptModel {
                 def getType: SmarkerType = SmarkerType.Opt(tpe.smarkerType)
                 def isEmpty: Boolean = x.isEmpty

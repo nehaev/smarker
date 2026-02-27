@@ -74,15 +74,9 @@ object ResolverTests extends TestSuite {
                 assert(resolvedCtx.scope.contains("age"))
                 assert(resolvedCtx.scope("age").getType == SmarkerType.Opt(SmarkerType.Int))
                 assert(resolvedCtx.scope.contains("address"))
-                assert(
-                    resolvedCtx.scope("address").getType == SmarkerType.Class(
-                        "Address",
-                        Map(
-                            "street" -> SmarkerType.String,
-                            "city" -> SmarkerType.String,
-                        ),
-                    )
-                )
+                val addrType0 = resolvedCtx.scope("address").getType.asInstanceOf[SmarkerType.Class]
+                assert(addrType0.name == "Address")
+                assert(addrType0.fields() == Map("street" -> SmarkerType.String, "city" -> SmarkerType.String))
             }
         }
         test("WhitespaceControl") {
@@ -145,15 +139,9 @@ object ResolverTests extends TestSuite {
             test("finds nested class field") {
                 val res = resolveIdent(Ast.Ident("address"), scopeCtx)
                 assert(res.isRight)
-                assert(
-                    res.toOption.get.getType == SmarkerType.Class(
-                        "Address",
-                        Map(
-                            "street" -> SmarkerType.String,
-                            "city" -> SmarkerType.String,
-                        ),
-                    )
-                )
+                val addrType1 = res.toOption.get.getType.asInstanceOf[SmarkerType.Class]
+                assert(addrType1.name == "Address")
+                assert(addrType1.fields() == Map("street" -> SmarkerType.String, "city" -> SmarkerType.String))
             }
             test("undefined variable returns error") {
                 val res = resolveIdent(Ast.Ident("nonexistent"), scopeCtx)
@@ -467,7 +455,9 @@ object ResolverTests extends TestSuite {
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
                 val err = res.left.toOption.get.asInstanceOf[TemplateReferenceMissingError]
-                assert(err.targetType == SmarkerType.Class("Address", Map("street" -> SmarkerType.String, "city" -> SmarkerType.String)))
+                val errType2 = err.targetType.asInstanceOf[SmarkerType.Class]
+                assert(errType2.name == "Address")
+                assert(errType2.fields() == Map("street" -> SmarkerType.String, "city" -> SmarkerType.String))
             }
             test("body-less: opt empty emits nothing") {
                 val data = Map("age" -> Option.empty[Int])
@@ -574,7 +564,9 @@ object ResolverTests extends TestSuite {
                 val res = render(tpl, model(data), ctx)
                 assert(res.isLeft)
                 val err = res.left.toOption.get.asInstanceOf[TemplateReferenceMissingError]
-                assert(err.targetType == SmarkerType.Class("Item", Map("label" -> SmarkerType.String, "value" -> SmarkerType.Int)))
+                val errType3 = err.targetType.asInstanceOf[SmarkerType.Class]
+                assert(errType3.name == "Item")
+                assert(errType3.fields() == Map("label" -> SmarkerType.String, "value" -> SmarkerType.Int))
             }
             test("body-less: empty list emits nothing") {
                 case class Root(items: List[String])
