@@ -30,17 +30,13 @@ final class TemplateSet private[smarker] (
 
 }
 
-object smarker {
+def template[T](src: String)(using tm: ToModel[T], tpe: SmarkerTypeOf[T]): Either[SmarkerParseError, CompiledTemplate[T]] = {
+    // SmarkerTypeOf[T] for a case class (derived via Mirror.ProductOf) always yields SmarkerType.Class
+    TemplateParser.parse(src).map { body => new CompiledTemplate[T](tpe.smarkerType.asInstanceOf[SmarkerType.Class].name, body, tm) }
+}
 
-    def template[T](src: String)(using tm: ToModel[T], tpe: SmarkerTypeOf[T]): Either[SmarkerParseError, CompiledTemplate[T]] = {
-        // SmarkerTypeOf[T] for a case class (derived via Mirror.ProductOf) always yields SmarkerType.Class
-        TemplateParser.parse(src).map { body => new CompiledTemplate[T](tpe.smarkerType.asInstanceOf[SmarkerType.Class].name, body, tm) }
-    }
-
-    def templates(ts: Either[SmarkerParseError, CompiledTemplate[?]]*): Either[SmarkerParseError, TemplateSet] = {
-        ts.foldLeft(Right(Vector.empty[CompiledTemplate[?]]).withLeft[SmarkerParseError]) { (acc, t) =>
-            for { prev <- acc; next <- t } yield prev :+ next
-        }.map { compiled => new TemplateSet(compiled.map(t => t.typeName -> t.body).toMap) }
-    }
-
+def templates(ts: Either[SmarkerParseError, CompiledTemplate[?]]*): Either[SmarkerParseError, TemplateSet] = {
+    ts.foldLeft(Right(Vector.empty[CompiledTemplate[?]]).withLeft[SmarkerParseError]) { (acc, t) =>
+        for { prev <- acc; next <- t } yield prev :+ next
+    }.map { compiled => new TemplateSet(compiled.map(t => t.typeName -> t.body).toMap) }
 }

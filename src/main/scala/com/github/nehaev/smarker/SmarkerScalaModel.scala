@@ -143,7 +143,7 @@ object SmarkerScalaModel {
         }
 
         given ToModel[Map[String, Any]] with {
-            def apply(x: Map[String, Any]): Model = model(x)
+            def apply(x: Map[String, Any]): Model = dynModel(x)
         }
 
         // Recursive derivation helpers for ToModel
@@ -214,7 +214,7 @@ object SmarkerScalaModel {
     }
 
     // Dyn model - for untyped Map[String, Any]
-    def model(fields: Map[String, Any]): DynModel = {
+    def dynModel(fields: Map[String, Any]): DynModel = {
         val modelFields = fields.map((k, v) => k -> anyToModel(v))
         new DynModel {
             def getType: SmarkerType = SmarkerType.Dyn
@@ -242,10 +242,10 @@ object SmarkerScalaModel {
                 def getUnderlyingObject: Any = o
             }
         case p: Product =>
-            model(
+            dynModel(
                 p.productElementNames.zip(p.productIterator).map((k, v) => k -> v).toMap
             )
-        case m: Map[_, _] => model(m.asInstanceOf[Map[String, Any]])
+        case m: Map[_, _] => dynModel(m.asInstanceOf[Map[String, Any]])
         case _            => throw new IllegalArgumentException(s"Unsupported type: ${v.getClass}")
     }
 

@@ -4,6 +4,9 @@ import utest._
 import Ast.AnySpan
 import Ast.WithSpan
 import Resolver.*
+import Resolver.Impl.resolveIdent
+import Resolver.Impl.resolveScope
+import Resolver.Impl.resolveSelect
 import SmarkerScalaModel.*
 import TemplateParser.Impl.templateBody
 
@@ -49,7 +52,7 @@ object ResolverTests extends TestSuite {
                 assert(resolvedCtx.scope("nickname").getType == SmarkerType.String)
             }
             test("resolveScope with dyn root") {
-                val dynRoot = model(Map[String, Any]("name" -> "Bob", "age" -> 42))
+                val dynRoot = dynModel(Map[String, Any]("name" -> "Bob", "age" -> 42))
                 val res = resolveScope(dynRoot, ctx)
                 assert(res.isRight)
                 val resolvedCtx = res.toOption.get
@@ -90,7 +93,7 @@ object ResolverTests extends TestSuite {
                 assert(res == Right("Name: Alice\nCity: Anytown"))
             }
             test("leading whitespace stripped from expression output") {
-                val dynRoot = model(Map[String, Any]("greeting" -> "  Hello"))
+                val dynRoot = dynModel(Map[String, Any]("greeting" -> "  Hello"))
                 val src = "[=greeting]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, dynRoot, ctx)
@@ -165,7 +168,7 @@ object ResolverTests extends TestSuite {
                 assert(res.toOption.get.getUnderlying[String] == "al")
             }
             test("works with dyn-based scope") {
-                val dynCtx = resolveScope(model(Map[String, Any]("label" -> "hello")), ctx).toOption.get
+                val dynCtx = resolveScope(dynModel(Map[String, Any]("label" -> "hello")), ctx).toOption.get
                 val res = resolveIdent(Ast.Ident("label"), dynCtx)
                 assert(res.isRight)
                 assert(res.toOption.get.getUnderlying[String] == "hello")
@@ -232,13 +235,13 @@ object ResolverTests extends TestSuite {
                 assert(res.toOption.get.getUnderlying[String] == "localhost")
             }
             test("dyn field access") {
-                val dynCtx = resolveScope(model(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Springfield"))), ctx).toOption.get
+                val dynCtx = resolveScope(dynModel(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Springfield"))), ctx).toOption.get
                 val res = resolveSelect(Ast.Select(Ast.Ident("addr"), "city"), dynCtx)
                 assert(res.isRight)
                 assert(res.toOption.get.getUnderlying[String] == "Springfield")
             }
             test("undefined field on dyn returns error") {
-                val dynCtx = resolveScope(model(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Springfield"))), ctx).toOption.get
+                val dynCtx = resolveScope(dynModel(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Springfield"))), ctx).toOption.get
                 val res = resolveSelect(Ast.Select(Ast.Ident("addr"), "zip"), dynCtx)
                 assert(res.isLeft)
             }
@@ -294,14 +297,14 @@ object ResolverTests extends TestSuite {
                 assert(res == Right("DB host: localhost"))
             }
             test("dyn root with primitive fields") {
-                val dynRoot = model(Map[String, Any]("greeting" -> "Hi", "count" -> 7))
+                val dynRoot = dynModel(Map[String, Any]("greeting" -> "Hi", "count" -> 7))
                 val src = "[=greeting] x[=count]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, dynRoot, ctx)
                 assert(res == Right("Hi x7"))
             }
             test("nested select through dyn field") {
-                val dynRoot = model(Map[String, Any]("loc" -> Map[String, Any]("city" -> "Paris")))
+                val dynRoot = dynModel(Map[String, Any]("loc" -> Map[String, Any]("city" -> "Paris")))
                 val src = "City: [=loc.city]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, dynRoot, ctx)
@@ -417,14 +420,14 @@ object ResolverTests extends TestSuite {
                 assert(res == Right("no-perm"))
             }
             test("dyn opt field non-empty") {
-                val dynRoot = model(Map[String, Any]("score" -> Some(99)))
+                val dynRoot = dynModel(Map[String, Any]("score" -> Some(99)))
                 val src = "[#ifDefined value=score as=\"s\"]score=[=s][/#ifDefined]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, dynRoot, ctx)
                 assert(res == Right("score=99"))
             }
             test("dyn nested map field in body") {
-                val dynRoot = model(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Rome")))
+                val dynRoot = dynModel(Map[String, Any]("addr" -> Map[String, Any]("city" -> "Rome")))
                 val src = "[#ifDefined value=addr]city=[=_.city][/#ifDefined]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, dynRoot, ctx)
@@ -629,7 +632,7 @@ object ResolverTests extends TestSuite {
                 assert(res == Right("\n    Alice\n        Alice"))
             }
             test("multiline scope variable has each line indented") {
-                val dynRoot = model(Map[String, Any]("text" -> "line1\nline2\nline3"))
+                val dynRoot = dynModel(Map[String, Any]("text" -> "line1\nline2\nline3"))
                 val src = "\n[#block][=text][/#block]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, dynRoot, ctx)
