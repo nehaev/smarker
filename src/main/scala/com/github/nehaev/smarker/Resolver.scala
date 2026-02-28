@@ -68,8 +68,13 @@ object Resolver {
 
         private def applyWhitespaceControl(elements: List[TemplateElement], stripLeadingNewline: Boolean): List[TemplateElement] = {
             def stripFirstNewline(rt: RawText): RawText = rt.elements match {
-                case RawNewLine :: rest => RawText(rest)
-                case _                  => rt
+                case RawNewLine :: rest =>
+                    val trimmed = rest.dropWhile {
+                        case RawString(s) => s.isBlank
+                        case _            => false
+                    }
+                    RawText(trimmed)
+                case _ => rt
             }
 
             // Strip the leading newline from the body start when the opening directive tag

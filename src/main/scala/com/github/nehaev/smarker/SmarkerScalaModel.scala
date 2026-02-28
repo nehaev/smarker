@@ -66,7 +66,7 @@ object SmarkerScalaModel {
                 fieldNames: List[String],
                 fieldTypes: List[SmarkerTypeOf[?]],
         ) extends SmarkerTypeOf[T] {
-            private lazy val fieldMap = fieldNames.zip(fieldTypes.map(_.smarkerType)).toMap
+            private def fieldMap = fieldNames.zip(fieldTypes.map(_.smarkerType)).toMap
             def smarkerType: SmarkerType = SmarkerType.Class(className, () => fieldMap)
         }
 
