@@ -73,10 +73,12 @@ object SmarkerScalaModel {
         inline given derived[T](using m: Mirror.Of[T]): SmarkerTypeOf[T] = {
             inline m match {
                 case p: Mirror.ProductOf[T] =>
+                    val x = summonTypeInstances[T, p.MirroredElemTypes]
+                    //if (x.exists(_ == null)) error("Unsupported type in product: " + constValue[m.MirroredLabel])
                     new ProductSmarkerType[T](
                         constValue[m.MirroredLabel],
                         getFieldNames[T](using m),
-                        summonTypeInstances[T, p.MirroredElemTypes],
+                        x//.filter(_ != null), // we need this due to some compiler bug
                     )
             }
         }

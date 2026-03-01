@@ -138,32 +138,6 @@ object Resolver {
                 } yield ()
             }
 
-            // TODO: renderValueUsingTemplateRef and renderItemUsingTemplateRef (in renderListDirectiveCall) are identical — extract as a shared private helper
-            def renderValueUsingTemplateRef(m: Model): Either[SmarkerResolutionError, Unit] = {
-                for {
-                    targetType <- m match {
-                        case c: ClassModel => Right(c.getType)
-                        case unk =>
-                            Left(
-                                TypeResolutionError(
-                                    "Unexpected value type for body-less",
-                                    "class",
-                                    unk.getType,
-                                    unk.getUnderlying,
-                                    ctx,
-                                    Some(name.span),
-                                )
-                            )
-                    }
-                    templateName = targetType.asInstanceOf[SmarkerType.Class].name
-                    templateBody <- ctx.templateRefs
-                        .get(templateName)
-                        .toRight(TemplateReferenceMissingError(targetType, m.getUnderlying, ctx, Some(name.span)))
-                    newCtx <- resolveScope(m, ctx.clearScope)
-                    _ <- renderDirectiveBody(templateBody.elements, newCtx, sb)
-                } yield ()
-            }
-
             for {
                 valueExpr <- dirCall.args.get("value").toRight(RequiredParamMissingError(name.value, "value", ctx, Some(name.span)))
                 altExprO = dirCall.args.get("alt")
@@ -174,9 +148,20 @@ object Resolver {
                     case other       => Some(other)
                 }
                 _ <- (resolvedValueModelO, bodyO) match {
-                    case (Some(m), Some(body)) => renderValueInBody(m, body)
-                    case (Some(m), None)       => renderValueUsingTemplateRef(m)
-                    case (None, _)             => altExprO.fold(Right(()))(renderExpr(_, ctx, sb))
+                    case (Some(m), Some(body))        => renderValueInBody(m, body)
+                    case (Some(cm: ClassModel), None) => renderClassModelUsingTemplateRef(cm, ctx, sb)
+                    case (Some(unk), _) =>
+                        Left(
+                            TypeResolutionError(
+                                "Unexpected value type for body-less ifDefined",
+                                "class",
+                                unk.getType,
+                                unk.getUnderlying,
+                                ctx,
+                                Some(name.span),
+                            )
+                        )
+                    case (None, _) => altExprO.fold(Right(()))(renderExpr(_, ctx, sb))
                 }
             } yield ()
         }
@@ -195,30 +180,6 @@ object Resolver {
                 } yield ()
             }
 
-            def renderItemUsingTemplateRef(item: Model): Either[SmarkerResolutionError, Unit] = {
-                for {
-                    targetType <- item match {
-                        case c: ClassModel => Right(c.getType)
-                        case unk =>
-                            Left(
-                                TypeResolutionError(
-                                    "Unexpected value type for body-less list",
-                                    "class",
-                                    unk.getType,
-                                    unk.getUnderlying,
-                                    ctx,
-                                    Some(name.span),
-                                )
-                            )
-                    }
-                    templateName = targetType.asInstanceOf[SmarkerType.Class].name
-                    templateBody <- ctx.templateRefs
-                        .get(templateName)
-                        .toRight(TemplateReferenceMissingError(targetType, item.getUnderlying, ctx, Some(name.span)))
-                    newCtx <- resolveScope(item, ctx.clearScope)
-                    _ <- renderDirectiveBody(templateBody.elements, newCtx, sb)
-                } yield ()
-            }
 
             for {
                 itemsExpr <- dirCall.args.get("items").toRight(RequiredParamMissingError(name.value, "items", ctx, Some(name.span)))
@@ -242,9 +203,20 @@ object Resolver {
                             acc.flatMap { _ =>
                                 // sep is between elements, not after the last one
                                 if (i > 0) write(sep, ctx, sb)
-                                bodyO match {
-                                    case Some(body) => renderItemInBody(item, body)
-                                    case None       => renderItemUsingTemplateRef(item)
+                                (item, bodyO) match {
+                                    case (_, Some(body))        => renderItemInBody(item, body)
+                                    case (cm: ClassModel, None) => renderClassModelUsingTemplateRef(cm, ctx, sb)
+                                    case (unk, None) =>
+                                        Left(
+                                            TypeResolutionError(
+                                                "Unexpected value type for body-less list",
+                                                "class",
+                                                unk.getType,
+                                                unk.getUnderlying,
+                                                ctx,
+                                                Some(name.span),
+                                            )
+                                        )
                                 }
                             }
                         }
@@ -277,8 +249,26 @@ object Resolver {
         def renderExpr(expr: Expr, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
             for {
                 model <- resolveExpr(expr, ctx)
-                str <- modelToString(model, ctx)
-            } yield write(str, ctx, sb)
+                str <- renderModel(model, ctx, sb)
+            } yield ()
+        }
+
+        def renderModel(model: Model, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = model match {
+            case pm: PrimitiveModel => Right(write(pm.getAsString, ctx, sb))
+            case cm: ClassModel     => renderClassModelUsingTemplateRef(cm, ctx, sb)
+            case _                  => Left(TypeResolutionError(s"Unable to render", "primitive or class", model.getType, model, ctx))
+        }
+
+        def renderClassModelUsingTemplateRef(cm: ClassModel, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
+            for {
+                targetType <- Right(cm.getType)
+                templateName = targetType.asInstanceOf[SmarkerType.Class].name
+                templateBody <- ctx.templateRefs
+                    .get(templateName)
+                    .toRight(TemplateReferenceMissingError(targetType, cm.getUnderlying, ctx, None)) // TODO: span
+                newCtx <- resolveScope(cm, ctx.clearScope)
+                _ <- renderDirectiveBody(templateBody.elements, newCtx, sb)
+            } yield ()
         }
 
         def resolveParam[T](
@@ -298,7 +288,10 @@ object Resolver {
                 default: String,
                 ctx: Context,
         ): Either[SmarkerResolutionError, String] =
-            resolveParam(args, key, default, ctx)(modelToString(_, ctx))
+            resolveParam(args, key, default, ctx) { m =>
+                if m.getType == SmarkerType.String then Right(m.getUnderlying[String])
+                else Left(TypeResolutionError(s"Wrong type for param '$key'", "string", m.getType, m, ctx, None)) // TODO: span
+            }
 
         def resolveIntParam(
                 args: Map[String, Expr],
@@ -350,11 +343,6 @@ object Resolver {
 
         private def modelFromScope(name: String, ctx: Context): Either[SmarkerResolutionError, Model] = {
             ctx.scope.get(name).toRight(ScopePathMissingError(name, ctx.scope, ctx))
-        }
-
-        private def modelToString(model: Model, ctx: Context): Either[SmarkerResolutionError, String] = model match {
-            case pm: PrimitiveModel => Right(pm.getAsString)
-            case _                  => Left(TypeResolutionError(s"Unable to render", "primitive", model.getType, model, ctx))
         }
 
         private def write(text: String, ctx: Context, sb: StringBuilder): Unit = {

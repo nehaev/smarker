@@ -307,16 +307,33 @@ object ResolverTests extends TestSuite {
                 assert(err.path == "unknown")
                 assert(err.span == None)
             }
-            test("non-primitive interpolation returns error") {
+            test("list interpolation returns error") {
                 val src = "Scores: [=scores]"
                 val tpl = templateBody.parseAll(src).toOption.get
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
                 val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
                 assert(err.message == "Unable to render")
-                assert(err.expectedType == "primitive")
+                assert(err.expectedType == "primitive or class")
                 assert(err.actualType == SmarkerType.List(SmarkerType.Int))
                 assert(err.span == None)
+            }
+            test("class interpolation") {
+                val addrTpl = templateBody.parseAll("[=street], [=city]").toOption.get
+                val ctxWithRefs = ctx.copy(templateRefs = Map("Address" -> addrTpl))
+                val src = "At: [=address]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctxWithRefs)
+                assert(res == Right("At: 123 Main St, Anytown"))
+            }
+            test("class interpolation with no template ref fails") {
+                val src = "[=address]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val err = res.left.toOption.get.asInstanceOf[TemplateReferenceMissingError]
+                val errType = err.targetType.asInstanceOf[SmarkerType.Class]
+                assert(errType.name == "Address")
             }
             test("error stops rendering mid-template") {
                 val src = "Before [=unknown] After [=name]"
@@ -437,7 +454,7 @@ object ResolverTests extends TestSuite {
                 val res = render(tpl, model(classModel), ctx)
                 assert(res.isLeft)
                 val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
-                assert(err.message == "Unexpected value type for body-less")
+                assert(err.message == "Unexpected value type for body-less ifDefined")
                 assert(err.expectedType == "class")
                 assert(err.actualType == SmarkerType.Int)
             }

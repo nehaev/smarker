@@ -12,7 +12,12 @@ object ShowcaseTests extends TestSuite {
             final case class JavaType(
                     `package`: String,
                     name: String,
-                    genericParams: List[JavaType],
+                    genericParams: List[SimpleJavaType],
+            )
+
+            final case class SimpleJavaType(
+                    `package`: String,
+                    name: String,
             )
 
             final case class JavaAnnotationParam(
@@ -127,10 +132,9 @@ object ShowcaseTests extends TestSuite {
                             `package` = "java.util",
                             name = "List",
                             genericParams = List(
-                                JavaType(
+                                SimpleJavaType(
                                     `package` = "java.lang",
                                     name = "String",
-                                    genericParams = Nil,
                                 )
                             ),
                         ),
@@ -181,16 +185,31 @@ object ShowcaseTests extends TestSuite {
             test("record header") {
                 val templateSet = templates(
                     template[JavaData]("""
+                        package [=type.package];
+
+                        [#list items=imports sep="\n" /]
+                        
+
                         public record [=name][#block start="(\n" end="\n)"]
                             [#list items=fields sep=",\n" as="f" /]
                         [/#block] {}
                         """.trim()),
-                    template[JavaField]("""
-                        [=type.name][#list items=type.genericParams start="<" end=">" sep=", " as="g"][=g.name][/#list] [=name]
-                        """.trim()),
+                    template[JavaType]("""[=name][#list items=genericParams start="<" end=">" sep=", " /]"""),
+                    template[SimpleJavaType]("""[=name]"""),
+                    template[JavaField]("""[=type] [=name]"""),
+                    template[JavaImport]("""import [=package].[=name];"""),
                 )
 
-                val expected ="""
+                val expected = """
+                    |package com.example;
+                    |
+                    |import com.example.BaseEntity;
+                    |import com.example.Builder;
+                    |import com.example.Versioned;
+                    |import java.util.List;
+                    |import javax.persistence.Entity;
+                    |import javax.persistence.Id;
+                    |
                     |public record User(
                     |    Long id,
                     |    String name,
@@ -199,7 +218,7 @@ object ShowcaseTests extends TestSuite {
                     |) {}
                 """.trim().stripMargin
 
-                val actual = templateSet.flatMap(_.render(javaData)).toOption.get
+                val actual = templateSet.flatMap(_.render(javaData)).left.map(println).toOption.get
                 assert(actual == expected)
             }
 
