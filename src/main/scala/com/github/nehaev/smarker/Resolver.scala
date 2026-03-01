@@ -27,7 +27,7 @@ object Resolver {
 
     private[smarker] object Impl {
 
-        def resolveScope(root: Model, ctx: Context, alias: Option[String] = None): Either[SmarkerResolutionError, Context] = {
+        def resolveScope(root: Model, ctx: Context): Either[SmarkerResolutionError, Context] = {
             val newScope = root match {
                 case map: MapModel =>
                     Right(map.keys.map(k => k -> map.get(k).get).toMap)
@@ -44,8 +44,7 @@ object Resolver {
             }
             for {
                 fields <- newScope
-                finalScope = alias.map(a => Map(a -> modelMapToDynModel(fields))).getOrElse(fields)
-            } yield ctx.addScope(finalScope)
+            } yield ctx.addScope(fields)
         }
 
         def renderBody(elements: List[TemplateElement], ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
@@ -92,11 +91,12 @@ object Resolver {
             // Only the first of multiple consecutive newlines is stripped (the others remain).
             @tailrec
             def loop(rem: List[TemplateElement], acc: List[TemplateElement], stripNext: Boolean): List[TemplateElement] = rem match {
-                case Nil                                => acc.reverse
-                case (rt: RawText) :: tail if stripNext => loop(tail, stripFirstNewline(rt) :: acc, false)
-                case (dc: DirectiveCall) :: tail        => loop(tail, dc :: acc, true)
-                case (c: Comment) :: tail               => loop(tail, c :: acc, true)
-                case head :: tail                       => loop(tail, head :: acc, false)
+                case Nil                                      => acc.reverse
+                case (rt: RawText) :: tail if stripNext       => loop(tail, stripFirstNewline(rt) :: acc, false)
+                case (dc @ DirectiveCall(_, _, None)) :: tail => loop(tail, dc :: acc, false)
+                case (dc: DirectiveCall) :: tail              => loop(tail, dc :: acc, true)
+                case (c: Comment) :: tail                     => loop(tail, c :: acc, true)
+                case head :: tail                             => loop(tail, head :: acc, false)
             }
 
             loop(afterLeadingStrip, Nil, false)
@@ -130,10 +130,7 @@ object Resolver {
             def renderValueInBody(m: Model, body: List[TemplateElement]): Either[SmarkerResolutionError, Unit] = {
                 for {
                     alias <- resolveStringParam(dirCall.args, "as", "_", ctx)
-                    newCtx <- m match {
-                        case _: MapModel | _: ClassModel | _: DynModel => resolveScope(m, ctx, Some(alias))
-                        case _                                         => Right(ctx.addScope(Map(alias -> m)))
-                    }
+                    newCtx = ctx.addScope(Map(alias -> m))
                     _ <- renderDirectiveBody(body, newCtx, sb)
                 } yield ()
             }
@@ -172,14 +169,10 @@ object Resolver {
             def renderItemInBody(item: Model, body: List[TemplateElement]): Either[SmarkerResolutionError, Unit] = {
                 for {
                     alias <- resolveStringParam(dirCall.args, "as", "_", ctx)
-                    newCtx <- item match {
-                        case _: MapModel | _: ClassModel | _: DynModel => resolveScope(item, ctx, Some(alias))
-                        case _                                         => Right(ctx.addScope(Map(alias -> item)))
-                    }
+                    newCtx = ctx.addScope(Map(alias -> item))
                     _ <- renderDirectiveBody(body, newCtx, sb)
                 } yield ()
             }
-
 
             for {
                 itemsExpr <- dirCall.args.get("items").toRight(RequiredParamMissingError(name.value, "items", ctx, Some(name.span)))

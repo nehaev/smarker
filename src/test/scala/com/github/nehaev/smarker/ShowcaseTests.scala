@@ -72,7 +72,16 @@ object ShowcaseTests extends TestSuite {
                             name = "Entity",
                             genericParams = Nil,
                         ),
-                        params = Nil,
+                        params = List(
+                            JavaAnnotationParam(
+                                name = "table",
+                                value = "\"user\"",
+                            ),
+                            JavaAnnotationParam(
+                                name = "schema",
+                                value = "\"public\"",
+                            ),
+                        ),
                     )
                 ),
                 superClass = Some(
@@ -188,16 +197,20 @@ object ShowcaseTests extends TestSuite {
                         package [=type.package];
 
                         [#list items=imports sep="\n" /]
-                        
 
-                        public record [=name][#block start="(\n" end="\n)"]
+                        [#list items=annotations sep="\n" /]
+                        public record [=name][#block start="(\n" end=")"]
                             [#list items=fields sep=",\n" as="f" /]
-                        [/#block] {}
+                        [/#block]
+                        [#ifDefined value=superClass as="s"] extends [=s][/#ifDefined]
+                        [#list items=interfaces start=" implements " sep=", " /] {}
                         """.trim()),
+                    template[JavaField]("""[#list items=annotations sep="\n" end="\n" /][=type] [=name]"""),
                     template[JavaType]("""[=name][#list items=genericParams start="<" end=">" sep=", " /]"""),
                     template[SimpleJavaType]("""[=name]"""),
-                    template[JavaField]("""[=type] [=name]"""),
                     template[JavaImport]("""import [=package].[=name];"""),
+                    template[JavaAnnotationParam]("""[=name] = [=value]"""),
+                    template[JavaAnnotation]("""@[=type.name][#list items=params start="(" end=")" sep=", " /]"""),
                 )
 
                 val expected = """
@@ -210,12 +223,14 @@ object ShowcaseTests extends TestSuite {
                     |import javax.persistence.Entity;
                     |import javax.persistence.Id;
                     |
+                    |@Entity(table = "user", schema = "public")
                     |public record User(
+                    |    @Id
                     |    Long id,
                     |    String name,
                     |    Integer version,
                     |    List<String> emails
-                    |) {}
+                    |) extends BaseEntity implements Versioned {}
                 """.trim().stripMargin
 
                 val actual = templateSet.flatMap(_.render(javaData)).left.map(println).toOption.get
