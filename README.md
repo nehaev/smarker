@@ -4,6 +4,22 @@ A typesafe templating language for Scala 3.
 
 Templates are text that mix raw content with *directives* (block-level control flow) and *interpolations* (inline expressions). Before a template can be rendered, it is checked against a **model** — a structural description of the data you intend to pass in.
 
+## Table of contents
+
+- [Setup](#setup)
+- [Quick start](#quick-start)
+- [Template syntax](#template-syntax)
+  - [Comments](#comments)
+  - [Interpolation](#interpolation)
+  - [ifDefined](#ifdefined)
+  - [list](#list)
+  - [block](#block)
+- [Supported types](#supported-types)
+  - [Primitives](#primitives)
+  - [Collections](#collections)
+  - [Object types](#object-types)
+- [Whitespace control](#whitespace-control)
+
 ## Setup
 
 ```scala
@@ -21,27 +37,17 @@ case class Market(products: List[Product])
 
 val templateSet = templates(
     template[Ingredient]("[=name]"),
-    template[Product]("""
-    - [=name]: $[=price]
-      [#block]Ingredients:
-        [#list items=ingredients sep="\n" /]
-      [/#block]
-    """),
-    template[Market]("""[#list items=products sep="\n" /]""")
+    template[Product]("[=name]: $[=price] ([#list items=ingredients sep=\", \" /])"),
+    template[Market]("[#list items=products sep=\", \" /]"),
 ).getOrElse(sys.error("template parse error"))
 
-val myMarket = Market(
-    products = List(
-        Product("Apple Pie", 3, List(
-            Ingredient("Flour"),
-            Ingredient("Sugar"),
-            Ingredient("Apple"),
-        )),
-        Product("Banana", 5, List(Ingredient("Banana")))
-    )
-)
+val market = Market(List(
+    Product("Apple Pie", 3, List(Ingredient("Flour"), Ingredient("Sugar"))),
+    Product("Banana",    5, List(Ingredient("Banana"))),
+))
 
-println(templateSet.render(myMarket))
+templateSet.render(market)
+// Right("Apple Pie: $3 (Flour, Sugar), Banana: $5 (Banana)")
 ```
 
 ## Template syntax
@@ -60,18 +66,50 @@ Comments are stripped from the output and never rendered.
 
 Embed the value of an expression into the output using `[=...]`. If the type of the expression is primitive, the value is implicitly converted to string. If the type of the expression is `class`, smarker looks for a registered template for that class and renders it.
 
+```scala
+case class Address(street: String, city: String)
+case class User(name: String, address: Address)
 ```
-Hello, [=user.name]! You are [=user.age] years old.
+
+```
+Hello, [=name]! Welcome to [=address.city].
+```
+
+```
+// User("Alice", Address("123 Main St", "Anytown"))
+Hello, Alice! Welcome to Anytown.
 ```
 
 ### ifDefined
 
 `[#ifDefined]` guards access to a value that may be absent. It renders its body when the value is present, otherwise emits the `alt` string. The `as` parameter binds the unwrapped value inside the body.
 
+```scala
+case class User(name: String, age: Option[Int], permissions: Map[String, Boolean])
 ```
-[#ifDefined value=user.nickname alt="(no nickname)" as="nick"]
-  Nickname: [=nick]
-[/#ifDefined]
+
+Optional field — present:
+```
+[#ifDefined value=age as="a"]age=[=a][/#ifDefined]
+// User(age = Some(30)) → "age=30"
+```
+
+Optional field — absent:
+```
+[#ifDefined value=age alt="unknown"][=_][/#ifDefined]
+// User(age = None) → "unknown"
+```
+
+Map key — present:
+```
+[#ifDefined value=permissions.admin as="v"]has-admin=[=v][/#ifDefined]
+// permissions = Map("admin" -> true) → "has-admin=true"
+```
+
+Map key — absent:
+```
+[#ifDefined value=permissions.superuser alt="no-perm"][=_][/#ifDefined]
+// permissions = Map("admin" -> true) → "no-perm"
 ```
 
 | Param   | Type   | Default | Description                                                     |
@@ -90,11 +128,41 @@ Absence is defined per type:
 
 Iterate over a sequence with `[#list]`.
 
+```scala
+case class User(scores: List[Int])
+// User(scores = List(95, 87, 42))
 ```
-[#list items=products as="p" sep="\n"]
-- [=p.name]: [=p.price]
-[/#list]
+
+Default separator:
 ```
+[#list items=scores][=_][/#list]
+// "95, 87, 42"
+```
+
+Custom separator:
+```
+[#list items=scores sep="|"][=_][/#list]
+// "95|87|42"
+```
+
+With `start` and `end`:
+```
+[#list items=scores start="[" end="]"][=_][/#list]
+// "[95, 87, 42]"
+```
+
+Class items with field access:
+```scala
+case class Item(label: String, value: Int)
+case class Root(items: List[Item])
+// Root(items = List(Item("a", 1), Item("b", 2)))
+```
+```
+[#list items=items as="it"][=it.label]=[=it.value][/#list]
+// "a=1, b=2"
+```
+
+When no body is given (`[#list items=xs /]`), smarker looks up the registered template for the element type and uses it to render each item.
 
 | Param   | Type           | Default | Description                                   |
 |---------|----------------|---------|-----------------------------------------------|
@@ -106,21 +174,28 @@ Iterate over a sequence with `[#list]`.
 
 The loop variable is scoped to the list body. Its type is inferred from the element type declared in the model, so field access is fully type-checked.
 
-When no body is given (`[#list items=xs /]`), smarker looks up the registered template for the element type and uses it to render each item.
-
 ### block
 
 `[#block]` explicitly controls indentation of its content. Because smarker strips leading whitespace from text segments, source indentation has no effect on output. Use `[#block]` whenever the rendered output needs to be indented.
 
+Default indentation (4 spaces):
 ```
-[#list items=products as="p" sep="\n"]
-- [=p.name]: [=p.price]
-  [#block]Ingredients:
-    [#list items=p.ingredients as="i" sep="\n"]
-    - [=i.name]
-    [/#list]
-  [/#block]
-[/#list]
+line1
+[#block]line2[/#block]
+// "line1\n    line2"
+```
+
+Nested blocks accumulate indentation:
+```
+[#block][=name]
+[#block][=name][/#block][/#block]
+// "    Alice\n        Alice"
+```
+
+Custom `identChar` and `identSize`:
+```
+[#block identChar="-" identSize=2]X[/#block]
+// "--X"
 ```
 
 | Param       | Type   | Default | Description                                              |
@@ -160,4 +235,3 @@ When no body is given (`[#list items=xs /]`), smarker looks up the registered te
 Smarker strips leading whitespace (indentation) from any text segment or expression output. To produce indented output use the `[#block]` directive.
 
 Trailing whitespace (including the line break) is stripped from lines that contain only directives or comments. If a directive is followed by multiple consecutive line breaks, only the first is stripped.
-
