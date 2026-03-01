@@ -3,8 +3,13 @@ package com.github.nehaev.smarker
 import com.github.nehaev.smarker.template
 import com.github.nehaev.smarker.templates
 import utest._
+import utest.framework.Formatter
 
 object ShowcaseTests extends TestSuite {
+
+    override val utestFormatter = new Formatter() {
+        override val formatTruncateHeight = 200
+    }
 
     val tests = Tests {
         test("JavaSource") {
@@ -31,7 +36,6 @@ object ShowcaseTests extends TestSuite {
             )
 
             final case class JavaBuilder(
-                    generate: Boolean,
                     generateInterface: Boolean,
                     interfaces: List[JavaType],
             )
@@ -152,7 +156,6 @@ object ShowcaseTests extends TestSuite {
                 ),
                 builder = Some(
                     JavaBuilder(
-                        generate = true,
                         generateInterface = false,
                         interfaces = List(
                             JavaType(
@@ -200,10 +203,37 @@ object ShowcaseTests extends TestSuite {
 
                         [#list items=annotations sep="\n" /]
                         public record [=name][#block start="(\n" end=")"]
-                            [#list items=fields sep=",\n" as="f" /]
+                            [#list items=fields sep=",\n" /]
                         [/#block]
                         [#ifDefined value=superClass as="s"] extends [=s][/#ifDefined]
-                        [#list items=interfaces start=" implements " sep=", " /] {}
+                        [#list items=interfaces start=" implements " end=" " sep=", " as="i"][=i][/#list]
+                        [#block start="{\n" end="}"]
+                            [#ifDefined value=builder as="b"]
+
+                                public static class [=name]Builder [#list items=b.interfaces start="implements " end=" " sep=", " /][#block start="{\n" end="}"]
+
+                                    [#list items=fields sep="" as="f"]
+                                        private [=f.type] [=f.name];
+                                    [/#list]
+
+                                    [#list items=fields sep="" as="f"]
+                                        public [=name]Builder [=f.name]([=f.type] [=f.name]) [#block start="{\n" end="}"]
+                                            this.[=f.name] = [=f.name];
+                                            return this;
+                                        [/#block]
+
+                                    [/#list]
+
+                                    public [=name] build() [#block start="{\n" end="}"]
+                                        return new [=name][#block start="(\n" end=")"]
+                                            [#list items=fields sep=",\n" as="f"][=f.name][/#list]
+                                        [/#block];
+                                    [/#block]
+
+                                [/#block]
+
+                            [/#ifDefined]
+                        [/#block]
                         """.trim()),
                     template[JavaField]("""[#list items=annotations sep="\n" end="\n" /][=type] [=name]"""),
                     template[JavaType]("""[=name][#list items=genericParams start="<" end=">" sep=", " /]"""),
@@ -230,7 +260,41 @@ object ShowcaseTests extends TestSuite {
                     |    String name,
                     |    Integer version,
                     |    List<String> emails
-                    |) extends BaseEntity implements Versioned {}
+                    |) extends BaseEntity implements Versioned {
+                    |
+                    |    public static class UserBuilder implements Builder {
+                    |
+                    |        private Long id;
+                    |        private String name;
+                    |        private Integer version;
+                    |        private List<String> emails;
+                    |
+                    |        public UserBuilder id(Long id) {
+                    |            this.id = id;
+                    |            return this;
+                    |        }
+                    |        public UserBuilder name(String name) {
+                    |            this.name = name;
+                    |            return this;
+                    |        }
+                    |        public UserBuilder version(Integer version) {
+                    |            this.version = version;
+                    |            return this;
+                    |        }
+                    |        public UserBuilder emails(List<String> emails) {
+                    |            this.emails = emails;
+                    |            return this;
+                    |        }
+                    |
+                    |        public User build() {
+                    |            return new User(
+                    |                id,
+                    |                name,
+                    |                version,
+                    |                emails);
+                    |        }
+                    |    }
+                    |}
                 """.trim().stripMargin
 
                 val actual = templateSet.flatMap(_.render(javaData)).left.map(println).toOption.get
