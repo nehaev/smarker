@@ -1,7 +1,7 @@
-package com.github.nehaev.smarker
+package io.github.nehaev.smarker
 
 import cats.syntax.show.toShow
-import com.github.nehaev.smarker.TemplateParser.TemplateReference
+import io.github.nehaev.smarker.TemplateParser.TemplateReference
 import utest.*
 import Ast.*
 import TemplateParser.Impl.*

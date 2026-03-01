@@ -1,4 +1,4 @@
-package com.github.nehaev.smarker
+package io.github.nehaev.smarker
 
 import scala.annotation.tailrec
 import Ast.*

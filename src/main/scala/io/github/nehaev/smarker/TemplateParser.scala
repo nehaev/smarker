@@ -1,4 +1,4 @@
-package com.github.nehaev.smarker
+package io.github.nehaev.smarker
 
 import cats.parse.{Parser => P}
 import cats.parse.{Parser0 => P0}

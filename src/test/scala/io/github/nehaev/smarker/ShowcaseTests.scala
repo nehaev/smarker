@@ -1,7 +1,7 @@
-package com.github.nehaev.smarker
+package io.github.nehaev.smarker
 
-import com.github.nehaev.smarker.template
-import com.github.nehaev.smarker.templates
+import io.github.nehaev.smarker.template
+import io.github.nehaev.smarker.templates
 import utest._
 import utest.framework.Formatter
 

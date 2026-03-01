@@ -1,4 +1,4 @@
-package com.github.nehaev.smarker
+package io.github.nehaev.smarker
 
 import scala.compiletime.constValue
 import scala.compiletime.constValueTuple

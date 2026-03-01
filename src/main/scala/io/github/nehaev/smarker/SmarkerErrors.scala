@@ -1,8 +1,8 @@
-package com.github.nehaev.smarker
+package io.github.nehaev.smarker
 
-import com.github.nehaev.smarker.Ast.Span
-import com.github.nehaev.smarker.Ast.SpanLike
-import com.github.nehaev.smarker.Resolver.Context
+import io.github.nehaev.smarker.Ast.Span
+import io.github.nehaev.smarker.Ast.SpanLike
+import io.github.nehaev.smarker.Resolver.Context
 import scala.annotation.tailrec
 import TemplateParser.TemplateReference
 
