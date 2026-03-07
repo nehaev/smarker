@@ -26,6 +26,10 @@ final case class StackSmarkerError(stage: String, cause: SmarkerError) extends S
 
 }
 
+final case class SmarkerDuplicateTemplateNameError(
+        templateName: String
+) extends SmarkerError
+
 final case class SmarkerParseError(
         templateBody: String,
         offset: Int,
@@ -66,6 +70,7 @@ final case class ScopePathMissingError(
 ) extends SmarkerResolutionError
 
 final case class TemplateReferenceMissingError(
+        templateName: String,
         targetType: SmarkerType,
         value: Any,
         context: Context,

@@ -258,7 +258,7 @@ object Resolver {
                 templateName = targetType.asInstanceOf[SmarkerType.Class].name
                 templateBody <- ctx.templateRefs
                     .get(templateName)
-                    .toRight(TemplateReferenceMissingError(targetType, cm.getUnderlying, ctx, None)) // TODO: span
+                    .toRight(TemplateReferenceMissingError(templateName, targetType, cm.getUnderlying, ctx, None)) // TODO: span
                 newCtx <- resolveScope(cm, ctx.clearScope)
                 _ <- renderDirectiveBody(templateBody.elements, newCtx, sb)
             } yield ()
