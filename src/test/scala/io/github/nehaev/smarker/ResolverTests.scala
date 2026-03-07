@@ -657,6 +657,67 @@ object ResolverTests extends TestSuite {
                 assert(res.left.toOption.get == err)
             }
         }
+        test("renderIfDirectiveCall") {
+            test("bool field false: nothing emitted") {
+                val data = dynModel(Map[String, Any]("active" -> false, "name" -> "Alice"))
+                val src = "[#if cond=active][=name][/#if]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, data, ctx)
+                assert(res == Right(""))
+            }
+            test("bool literal true: body rendered") {
+                val src = "[#if cond=true]yes[/#if]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("yes"))
+            }
+            test("bool literal false: nothing emitted") {
+                val src = "[#if cond=false]yes[/#if]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right(""))
+            }
+            test("false: surrounding text preserved") {
+                val src = "before[#if cond=false]X[/#if]after"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res == Right("beforeafter"))
+            }
+            test("nested interpolation in body rendered correctly") {
+                val data = dynModel(Map[String, Any]("active" -> true, "name" -> "Alice"))
+                val src = "[#if cond=active]Name: [=name][/#if]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, data, ctx)
+                assert(res == Right("Name: Alice"))
+            }
+            test("missing cond returns RequiredParamMissingError") {
+                val src = "[#if][=name][/#if]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("if", "cond", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
+            }
+            test("non-bool cond returns TypeResolutionError") {
+                val src = "[#if cond=name]body[/#if]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val err = res.left.toOption.get.asInstanceOf[TypeResolutionError]
+                assert(err.expectedType == "bool")
+                assert(err.actualType == SmarkerType.String)
+            }
+            test("self-closing returns RequiredParamMissingError for body") {
+                val src = "[#if cond=true /]"
+                val tpl = templateBody.parseAll(src).toOption.get
+                val res = render(tpl, model(classModel), ctx)
+                assert(res.isLeft)
+                val errCtx = res.left.toOption.get.context
+                val err = RequiredParamMissingError("if", "body", errCtx, Some(AnySpan))
+                assert(res.left.toOption.get == err)
+            }
+        }
 
     }
 

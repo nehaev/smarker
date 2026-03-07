@@ -118,6 +118,7 @@ object Resolver {
 
         def renderDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] =
             dirCall.name.value match {
+                case "if"        => renderIfDirectiveCall(dirCall, ctx, sb)
                 case "ifDefined" => renderIfDefinedDirectiveCall(dirCall, ctx, sb)
                 case "list"      => renderListDirectiveCall(dirCall, ctx, sb)
                 case "block"     => renderBlockDirectiveCall(dirCall, ctx, sb)
@@ -219,6 +220,16 @@ object Resolver {
             } yield ()
         }
 
+        def renderIfDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
+            val name = dirCall.name
+            for {
+                _ <- dirCall.args.get("cond").toRight(RequiredParamMissingError(name.value, "cond", ctx, Some(name.span)))
+                cond <- resolveBoolParam(dirCall.args, "cond", false, ctx)
+                elements <- dirCall.body.toRight(RequiredParamMissingError(name.value, "body", ctx, Some(name.span)))
+                _ <- if (cond) renderDirectiveBody(elements, ctx, sb) else Right(())
+            } yield ()
+        }
+
         def renderBlockDirectiveCall(dirCall: DirectiveCall, ctx: Context, sb: StringBuilder): Either[SmarkerResolutionError, Unit] = {
             val name = dirCall.name
             for {
@@ -296,6 +307,17 @@ object Resolver {
             resolveParam(args, key, default, ctx) { m =>
                 if m.getType == SmarkerType.Int then Right(m.getUnderlying[Int])
                 else Left(TypeResolutionError(s"Wrong type for param '$key'", "int", m.getType, m, ctx, Some(span)))
+            }
+
+        def resolveBoolParam(
+                args: Map[String, Expr],
+                key: String,
+                default: Boolean,
+                ctx: Context,
+        ): Either[SmarkerResolutionError, Boolean] =
+            resolveParam(args, key, default, ctx) { m =>
+                if m.getType == SmarkerType.Bool then Right(m.getUnderlying[Boolean])
+                else Left(TypeResolutionError(s"Wrong type for param '$key'", "bool", m.getType, m, ctx, None))
             }
 
         def resolveExpr(expr: Expr, ctx: Context): Either[SmarkerResolutionError, Model] = {
