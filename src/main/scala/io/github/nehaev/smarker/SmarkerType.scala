@@ -1,5 +1,8 @@
 package io.github.nehaev.smarker
 
+import cats.syntax.show.*
+import cats.Show
+
 enum SmarkerType derives CanEqual {
 
     // Primitive types always rendered as toString
@@ -17,4 +20,18 @@ enum SmarkerType derives CanEqual {
     case Dyn
 
     case Nothing
+}
+
+object SmarkerType {
+    given Show[SmarkerType] = Show.show {
+        case String      => "string"
+        case Int         => "int"
+        case Bool        => "bool"
+        case List(t)     => s"list[${t.show}]"
+        case Map(t)      => s"map[${t.show}]"
+        case Opt(t)      => s"opt[${t.show}]"
+        case Class(n, _) => n
+        case Dyn         => "dyn"
+        case Nothing     => "nothing"
+    }
 }
