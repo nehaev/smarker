@@ -2,7 +2,7 @@
 
 A minimalistic typesafe templating language for Scala 3.
 It has [freemarker](https://github.com/apache/freemarker)-like syntax.
-Smarker's main purpose is to render pre-processed type-annotated structures (i.e. *models*) into text.
+Smarker's main purpose is to render well-formed type-annotated structures (called *models*) into text.
 
 ## Table of contents
 
@@ -33,23 +33,61 @@ Define models, templates, and render:
 ```scala
 import io.github.nehaev.smarker.*
 
-case class Ingredient(name: String)
-case class Product(name: String, price: Int, ingredients: List[Ingredient])
-case class Market(products: List[Product])
-
-val templateSet = templates(
-    template[Ingredient]("""[=name]"""),
-    template[Product]("""[=name]: $[=price] ([#list items=ingredients sep=", " /])"""),
-    template[Market]("""[#list items=products sep=", " /]"""),
+case class Item(
+    name: String,
+    qty: Int,
+    inStock: Boolean
 )
 
-val market = Market(List(
-    Product("Apple Pie", 3, List(Ingredient("Flour"), Ingredient("Sugar"))),
-    Product("Banana",    5, List(Ingredient("Banana"))),
-))
+case class Order(
+    id: String,
+    customer: String,
+    items: List[Item],
+    promoCode: Option[String],
+    urgent: Boolean,
+)
 
-templateSet.flatMap(_.render(market))
-// Right("Apple Pie: $3 (Flour, Sugar), Banana: $5 (Banana)")
+val templateSet = templates(
+    template[Order]("""
+        |[#-- Order confirmation --]
+        |[#if cond=urgent]
+        |    URGENT
+        |[/#if]
+        |Order #[=id] for [=customer]
+        |[#ifDefined value=promoCode as="code"]
+        |    Promo: [=code]
+        |[/#ifDefined]
+        |Items:
+        |[#block]
+        |    [#list items=items sep="\n" /]
+        |[/#block]""".trim.stripMargin
+    ),
+    template[Item]("""[=name] x[=qty][#if cond=inStock] (in stock)[/#if]""")
+)
+
+val order = Order(
+    id = "1042",
+    customer = "Alice",
+    items = List(
+        Item(name = "Widget", qty = 2, inStock = true),
+        Item(name = "Gadget", qty = 1, inStock = false),
+    ),
+    promoCode = Some("SAVE10"),
+    urgent = true,
+)
+
+println(templateSet.flatMap(_.render(order)))
+```
+
+This should print the following output:
+
+```
+URGENT
+Order #1042 for Alice
+Promo: SAVE10
+Items:
+    Widget x2 (in stock)
+    Gadget x1
 ```
 
 ## Template syntax

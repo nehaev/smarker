@@ -302,6 +302,66 @@ object ShowcaseTests extends TestSuite {
             }
 
         }
+
+        test("OrderConfirmation") {
+
+            case class Item(
+                    name: String,
+                    qty: Int,
+                    inStock: Boolean,
+            )
+
+            case class Order(
+                    id: String,
+                    customer: String,
+                    items: List[Item],
+                    promoCode: Option[String],
+                    urgent: Boolean,
+            )
+
+            val templateSet = templates(
+                template[Order](
+                    """
+                    |[#-- Order confirmation --]
+                    |[#if cond=urgent]
+                    |    URGENT
+                    |[/#if]
+                    |Order #[=id] for [=customer]
+                    |[#ifDefined value=promoCode as="code"]
+                    |    Promo: [=code]
+                    |[/#ifDefined]
+                    |Items:
+                    |[#block]
+                    |    [#list items=items sep="\n" /]
+                    |[/#block]""".trim.stripMargin
+                ),
+                template[Item]("""[=name] x[=qty][#if cond=inStock] (in stock)[/#if]"""),
+            )
+
+            val order = Order(
+                id = "1042",
+                customer = "Alice",
+                items = List(
+                    Item(name = "Widget", qty = 2, inStock = true),
+                    Item(name = "Gadget", qty = 1, inStock = false),
+                ),
+                promoCode = Some("SAVE10"),
+                urgent = true,
+            )
+
+            val expected =
+                """URGENT
+                |Order #1042 for Alice
+                |Promo: SAVE10
+                |Items:
+                |    Widget x2 (in stock)
+                |    Gadget x1
+                |""".stripMargin
+
+            val actual = templateSet.flatMap(_.render(order)).left.map(println).toOption.get
+            assert(actual == expected)
+        }
+
     }
 
 }
