@@ -1,7 +1,7 @@
 # smarker
 
 ![Build](https://img.shields.io/github/actions/workflow/status/nehaev/smarker/build-and-test.yaml?branch=main)
-![Maven Central](https://img.shields.io/maven-central/v/io.github.nehaev/smarker?color=blue)
+![Maven Central](https://img.shields.io/maven-central/v/io.github.nehaev/smarker_3?color=blue)
 
 A minimalistic typesafe templating engine for Scala 3.
 It has [freemarker](https://github.com/apache/freemarker)-like syntax.
