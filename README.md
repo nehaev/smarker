@@ -1,6 +1,9 @@
 # smarker
 
-A minimalistic typesafe templating language for Scala 3.
+![Build](https://img.shields.io/github/actions/workflow/status/nehaev/smarker/build-and-test.yaml?branch=main)
+![Maven Central](https://img.shields.io/maven-central/v/io.github.nehaev/smarker?color=blue)
+
+A minimalistic typesafe templating engine for Scala 3.
 It has [freemarker](https://github.com/apache/freemarker)-like syntax.
 Smarker's main purpose is to render well-formed type-annotated structures (called *models*) into text.
 
@@ -8,24 +11,19 @@ Smarker's main purpose is to render well-formed type-annotated structures (calle
 
 - [Quick start](#quick-start)
 - [Template syntax](#template-syntax)
-  - [Comments](#comments)
-  - [Interpolation](#interpolation)
   - [ifDefined](#ifdefined)
   - [if](#if)
   - [list](#list)
   - [block](#block)
 - [Supported types](#supported-types)
-  - [Primitives](#primitives)
-  - [Collections](#collections)
-  - [Object types](#object-types)
-- [Whitespace control](#whitespace-control)
+- [Whitespace control](#whitespace-control-wip)
 
 ## Quick start
 
 Add the following dependency to your project:
 
 ```scala
-libraryDependencies += "io.github.nehaev" %% "smarker" % "<version>"
+libraryDependencies += "io.github.nehaev" %% "smarker" % "0.0.1"
 ```
 
 Define models, templates, and render:
