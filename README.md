@@ -8,17 +8,12 @@ Smarker's main purpose is to render well-formed type-annotated structures (calle
 
 - [Quick start](#quick-start)
 - [Template syntax](#template-syntax)
-  - [Comments](#comments)
-  - [Interpolation](#interpolation)
   - [ifDefined](#ifdefined)
   - [if](#if)
   - [list](#list)
   - [block](#block)
 - [Supported types](#supported-types)
-  - [Primitives](#primitives)
-  - [Collections](#collections)
-  - [Object types](#object-types)
-- [Whitespace control](#whitespace-control)
+- [Whitespace control](#whitespace-control-wip)
 
 ## Quick start
 
